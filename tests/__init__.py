@@ -1,0 +1,1 @@
+# GoPro Bridge test package

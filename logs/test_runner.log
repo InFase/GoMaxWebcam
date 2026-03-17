@@ -1,0 +1,288 @@
+2026-03-17 12:06:18,300 [INFO] ============================================================
+2026-03-17 12:06:18,300 [INFO] Test runner started — limit: 2048 MB
+2026-03-17 12:06:18,459 [INFO] GoPro detected: False
+2026-03-17 12:06:18,459 [INFO] No GoPro connected — tests will be skipped by conftest.py. Use --force-run to override.
+2026-03-17 12:06:18,459 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/ -q --tb=short
+2026-03-17 12:06:18,505 [INFO] Job Object created — memory limit: 2048 MB
+2026-03-17 12:06:18,520 [INFO] pytest spawned (PID 27412) — suspended, assigning to job ...
+2026-03-17 12:06:18,521 [INFO] pytest resumed inside Job Object
+2026-03-17 12:06:45,680 [INFO] ============================================================
+2026-03-17 12:06:45,680 [INFO] Test runner started — limit: 2048 MB
+2026-03-17 12:06:45,822 [INFO] GoPro detected: False
+2026-03-17 12:06:45,822 [INFO] No GoPro connected — tests will be skipped by conftest.py. Use --force-run to override.
+2026-03-17 12:06:45,823 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/ -q --tb=short
+2026-03-17 12:06:45,847 [INFO] Job Object created — memory limit: 2048 MB
+2026-03-17 12:06:45,864 [INFO] pytest spawned (PID 14716) — suspended, assigning to job ...
+2026-03-17 12:06:45,864 [INFO] pytest resumed inside Job Object
+2026-03-17 12:07:03,505 [INFO] ============================================================
+2026-03-17 12:07:03,505 [INFO] Test runner started — limit: 2048 MB
+2026-03-17 12:07:03,636 [INFO] GoPro detected: False
+2026-03-17 12:07:03,636 [INFO] No GoPro connected — tests will be skipped by conftest.py. Use --force-run to override.
+2026-03-17 12:07:03,636 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/ -q --tb=short
+2026-03-17 12:07:03,642 [INFO] Job Object created — memory limit: 2048 MB
+2026-03-17 12:07:03,658 [INFO] pytest spawned (PID 15072) — suspended, assigning to job ...
+2026-03-17 12:07:03,658 [INFO] pytest resumed inside Job Object
+2026-03-17 12:07:08,526 [INFO] pytest exited with code 0 in 4.9s
+2026-03-17 12:07:08,526 [INFO] ============================================================
+2026-03-17 12:08:37,974 [INFO] ============================================================
+2026-03-17 12:08:37,975 [INFO] Test runner started — limit: 2048 MB
+2026-03-17 12:08:38,119 [INFO] GoPro detected: True
+2026-03-17 12:08:38,119 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/ -q --tb=short
+2026-03-17 12:08:38,214 [INFO] Job Object created — memory limit: 2048 MB
+2026-03-17 12:08:38,231 [INFO] pytest spawned (PID 10272) — suspended, assigning to job ...
+2026-03-17 12:08:38,231 [INFO] pytest resumed inside Job Object
+2026-03-17 12:09:38,713 [INFO] pytest exited with code 1 in 60.6s
+2026-03-17 12:09:38,713 [INFO] ============================================================
+2026-03-17 12:21:30,357 [INFO] ============================================================
+2026-03-17 12:21:30,357 [INFO] Test runner started — limit: 2048 MB
+2026-03-17 12:21:30,500 [INFO] GoPro detected: True
+2026-03-17 12:21:30,500 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/ -q --tb=short
+2026-03-17 12:21:30,506 [INFO] Job Object created — memory limit: 2048 MB
+2026-03-17 12:21:30,522 [INFO] pytest spawned (PID 9856) — suspended, assigning to job ...
+2026-03-17 12:21:30,522 [INFO] pytest resumed inside Job Object
+2026-03-17 12:22:26,905 [INFO] pytest exited with code -1073741571 in 56.4s
+2026-03-17 12:22:26,905 [INFO] ============================================================
+2026-03-17 12:25:57,178 [INFO] ============================================================
+2026-03-17 12:25:57,178 [INFO] Test runner started — limit: 2048 MB
+2026-03-17 12:25:57,320 [INFO] GoPro detected: True
+2026-03-17 12:25:57,320 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/ -q --tb=short
+2026-03-17 12:25:57,326 [INFO] Job Object created — memory limit: 2048 MB
+2026-03-17 12:25:57,342 [INFO] pytest spawned (PID 11460) — suspended, assigning to job ...
+2026-03-17 12:25:57,342 [INFO] pytest resumed inside Job Object
+2026-03-17 12:26:59,000 [INFO] pytest exited with code 1 in 61.7s
+2026-03-17 12:26:59,000 [INFO] ============================================================
+2026-03-17 12:28:34,663 [INFO] ============================================================
+2026-03-17 12:28:34,663 [INFO] Test runner started — limit: 2048 MB
+2026-03-17 12:28:34,810 [INFO] GoPro detected: True
+2026-03-17 12:28:34,810 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/ -q --tb=short
+2026-03-17 12:28:34,817 [INFO] Job Object created — memory limit: 2048 MB
+2026-03-17 12:28:34,832 [INFO] pytest spawned (PID 9912) — suspended, assigning to job ...
+2026-03-17 12:28:34,832 [INFO] pytest resumed inside Job Object
+2026-03-17 12:30:28,273 [INFO] pytest exited with code 1 in 113.5s
+2026-03-17 12:30:28,273 [INFO] ============================================================
+2026-03-17 12:30:58,853 [INFO] ============================================================
+2026-03-17 12:30:58,853 [INFO] Test runner started — limit: 4096 MB
+2026-03-17 12:30:58,990 [INFO] GoPro detected: True
+2026-03-17 12:30:58,990 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/ -v --tb=short
+2026-03-17 12:30:58,996 [INFO] Job Object created — memory limit: 4096 MB
+2026-03-17 12:30:59,011 [INFO] pytest spawned (PID 19052) — suspended, assigning to job ...
+2026-03-17 12:30:59,011 [INFO] pytest resumed inside Job Object
+2026-03-17 12:33:04,415 [INFO] pytest exited with code 1 in 125.4s
+2026-03-17 12:33:04,415 [INFO] ============================================================
+2026-03-17 12:33:09,444 [INFO] ============================================================
+2026-03-17 12:33:09,444 [INFO] Test runner started — limit: 4096 MB
+2026-03-17 12:33:09,591 [INFO] GoPro detected: True
+2026-03-17 12:33:09,591 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/ -v --tb=short
+2026-03-17 12:33:09,597 [INFO] Job Object created — memory limit: 4096 MB
+2026-03-17 12:33:09,612 [INFO] pytest spawned (PID 26936) — suspended, assigning to job ...
+2026-03-17 12:33:09,612 [INFO] pytest resumed inside Job Object
+2026-03-17 12:35:16,021 [INFO] pytest exited with code 1 in 126.4s
+2026-03-17 12:35:16,021 [INFO] ============================================================
+2026-03-17 12:35:28,741 [INFO] ============================================================
+2026-03-17 12:35:28,741 [INFO] Test runner started — limit: 4096 MB
+2026-03-17 12:35:28,880 [INFO] GoPro detected: True
+2026-03-17 12:35:28,880 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/ -q --tb=line
+2026-03-17 12:35:28,886 [INFO] Job Object created — memory limit: 4096 MB
+2026-03-17 12:35:28,902 [INFO] pytest spawned (PID 6948) — suspended, assigning to job ...
+2026-03-17 12:35:28,902 [INFO] pytest resumed inside Job Object
+2026-03-17 12:37:34,894 [INFO] pytest exited with code 1 in 126.0s
+2026-03-17 12:37:34,894 [INFO] ============================================================
+2026-03-17 12:44:43,166 [INFO] ============================================================
+2026-03-17 12:44:43,166 [INFO] Test runner started — limit: 4096 MB
+2026-03-17 12:44:43,307 [INFO] GoPro detected: True
+2026-03-17 12:44:43,307 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/ -q --tb=line
+2026-03-17 12:44:43,313 [INFO] Job Object created — memory limit: 4096 MB
+2026-03-17 12:44:43,328 [INFO] pytest spawned (PID 3148) — suspended, assigning to job ...
+2026-03-17 12:44:43,329 [INFO] pytest resumed inside Job Object
+2026-03-17 12:46:49,850 [INFO] pytest exited with code 1 in 126.5s
+2026-03-17 12:46:49,850 [INFO] ============================================================
+2026-03-17 12:47:20,852 [INFO] ============================================================
+2026-03-17 12:47:20,852 [INFO] Test runner started — limit: 4096 MB
+2026-03-17 12:47:21,002 [INFO] GoPro detected: True
+2026-03-17 12:47:21,003 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/test_seamless_transition.py tests/test_disconnect_freeze.py tests/test_ffmpeg_crash_recovery.py tests/test_freeze_frame_resilience.py tests/test_pipeline_wiring.py tests/test_resolution_freeze_frame.py tests/test_resolution_pipeline_reinit.py -q --tb=short -x
+2026-03-17 12:47:21,088 [INFO] Job Object created — memory limit: 4096 MB
+2026-03-17 12:47:21,104 [INFO] pytest spawned (PID 8172) — suspended, assigning to job ...
+2026-03-17 12:47:21,104 [INFO] pytest resumed inside Job Object
+2026-03-17 12:47:28,586 [INFO] pytest exited with code 1 in 7.6s
+2026-03-17 12:47:28,587 [INFO] ============================================================
+2026-03-17 12:48:41,907 [INFO] ============================================================
+2026-03-17 12:48:41,907 [INFO] Test runner started — limit: 4096 MB
+2026-03-17 12:48:42,060 [INFO] GoPro detected: True
+2026-03-17 12:48:42,060 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/ -q --tb=line
+2026-03-17 12:48:42,066 [INFO] Job Object created — memory limit: 4096 MB
+2026-03-17 12:48:42,082 [INFO] pytest spawned (PID 1772) — suspended, assigning to job ...
+2026-03-17 12:48:42,082 [INFO] pytest resumed inside Job Object
+2026-03-17 12:50:56,993 [INFO] pytest exited with code 1 in 134.9s
+2026-03-17 12:50:56,993 [INFO] ============================================================
+2026-03-17 12:51:34,580 [INFO] ============================================================
+2026-03-17 12:51:34,580 [INFO] Test runner started — limit: 4096 MB
+2026-03-17 12:51:34,725 [INFO] GoPro detected: True
+2026-03-17 12:51:34,725 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/ -q --tb=line
+2026-03-17 12:51:34,732 [INFO] Job Object created — memory limit: 4096 MB
+2026-03-17 12:51:34,747 [INFO] pytest spawned (PID 16700) — suspended, assigning to job ...
+2026-03-17 12:51:34,747 [INFO] pytest resumed inside Job Object
+2026-03-17 12:53:01,283 [INFO] pytest exited with code 1 in 86.6s
+2026-03-17 12:53:01,283 [INFO] ============================================================
+2026-03-17 12:53:11,351 [INFO] ============================================================
+2026-03-17 12:53:11,351 [INFO] Test runner started — limit: 4096 MB
+2026-03-17 12:53:11,499 [INFO] GoPro detected: True
+2026-03-17 12:53:11,499 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/test_seamless_transition.py::TestSwapReaderExitsFreeze::test_swap_reader_exits_freeze_state -q --tb=short
+2026-03-17 12:53:11,505 [INFO] Job Object created — memory limit: 4096 MB
+2026-03-17 12:53:11,520 [INFO] pytest spawned (PID 23056) — suspended, assigning to job ...
+2026-03-17 12:53:11,520 [INFO] pytest resumed inside Job Object
+2026-03-17 12:53:12,173 [INFO] pytest exited with code 1 in 0.7s
+2026-03-17 12:53:12,173 [INFO] ============================================================
+2026-03-17 12:54:07,538 [INFO] ============================================================
+2026-03-17 12:54:07,538 [INFO] Test runner started — limit: 4096 MB
+2026-03-17 12:54:07,676 [INFO] GoPro detected: True
+2026-03-17 12:54:07,676 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/ -q --tb=line
+2026-03-17 12:54:07,682 [INFO] Job Object created — memory limit: 4096 MB
+2026-03-17 12:54:07,697 [INFO] pytest spawned (PID 18696) — suspended, assigning to job ...
+2026-03-17 12:54:07,697 [INFO] pytest resumed inside Job Object
+2026-03-17 12:54:09,053 [INFO] pytest exited with code 2 in 1.4s
+2026-03-17 12:54:09,054 [INFO] ============================================================
+2026-03-17 12:54:36,073 [INFO] ============================================================
+2026-03-17 12:54:36,073 [INFO] Test runner started — limit: 4096 MB
+2026-03-17 12:54:36,220 [INFO] GoPro detected: True
+2026-03-17 12:54:36,220 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/test_seamless_transition.py::TestSwapReaderExitsFreeze::test_swap_reader_exits_freeze_state -q --tb=short
+2026-03-17 12:54:36,226 [INFO] Job Object created — memory limit: 4096 MB
+2026-03-17 12:54:36,242 [INFO] pytest spawned (PID 9912) — suspended, assigning to job ...
+2026-03-17 12:54:36,242 [INFO] pytest resumed inside Job Object
+2026-03-17 12:54:37,603 [INFO] pytest exited with code 0 in 1.4s
+2026-03-17 12:54:37,603 [INFO] ============================================================
+2026-03-17 12:54:44,228 [INFO] ============================================================
+2026-03-17 12:54:44,228 [INFO] Test runner started — limit: 4096 MB
+2026-03-17 12:54:44,363 [INFO] GoPro detected: True
+2026-03-17 12:54:44,363 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/ -q --tb=line
+2026-03-17 12:54:44,369 [INFO] Job Object created — memory limit: 4096 MB
+2026-03-17 12:54:44,384 [INFO] pytest spawned (PID 21824) — suspended, assigning to job ...
+2026-03-17 12:54:44,384 [INFO] pytest resumed inside Job Object
+2026-03-17 12:57:01,766 [INFO] pytest exited with code 1 in 137.4s
+2026-03-17 12:57:01,767 [INFO] ============================================================
+2026-03-17 12:57:13,119 [INFO] ============================================================
+2026-03-17 12:57:13,119 [INFO] Test runner started — limit: 4096 MB
+2026-03-17 12:57:13,258 [INFO] GoPro detected: True
+2026-03-17 12:57:13,258 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/test_disconnect_freeze.py::TestDetachToFreezeIntegration::test_detach_event_freezes_pipeline tests/test_ffmpeg_crash_recovery.py::TestFFmpegCrashPipelineIntegration::test_pipeline_survives_ffmpeg_crash_and_reader_swap tests/test_freeze_frame_resilience.py::TestContinuousFrameEmission::test_swap_reader_seamlessly_resumes_live tests/test_resolution_freeze_frame.py::TestPipelineResolutionTransition::test_transition_enters_freeze_frame tests/test_resolution_freeze_frame.py::TestPipelineResolutionTransition::test_transition_noop_same_resolution tests/test_seamless_transition.py::TestMultipleReconnectCycles::test_three_cycles_seamless -v --tb=short
+2026-03-17 12:57:13,264 [INFO] Job Object created — memory limit: 4096 MB
+2026-03-17 12:57:13,279 [INFO] pytest spawned (PID 14504) — suspended, assigning to job ...
+2026-03-17 12:57:13,280 [INFO] pytest resumed inside Job Object
+2026-03-17 12:57:16,922 [INFO] pytest exited with code 1 in 3.7s
+2026-03-17 12:57:16,923 [INFO] ============================================================
+2026-03-17 13:00:47,354 [INFO] ============================================================
+2026-03-17 13:00:47,354 [INFO] Test runner started — limit: 4096 MB
+2026-03-17 13:00:47,498 [INFO] GoPro detected: True
+2026-03-17 13:00:47,499 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/test_disconnect_freeze.py::TestDetachToFreezeIntegration::test_detach_event_freezes_pipeline tests/test_ffmpeg_crash_recovery.py::TestFFmpegCrashPipelineIntegration::test_pipeline_survives_ffmpeg_crash_and_reader_swap tests/test_freeze_frame_resilience.py::TestContinuousFrameEmission::test_swap_reader_seamlessly_resumes_live tests/test_resolution_freeze_frame.py::TestPipelineResolutionTransition::test_transition_enters_freeze_frame tests/test_resolution_freeze_frame.py::TestPipelineResolutionTransition::test_transition_noop_same_resolution tests/test_seamless_transition.py::TestMultipleReconnectCycles::test_three_cycles_seamless -v --tb=short
+2026-03-17 13:00:47,505 [INFO] Job Object created — memory limit: 4096 MB
+2026-03-17 13:00:47,521 [INFO] pytest spawned (PID 16152) — suspended, assigning to job ...
+2026-03-17 13:00:47,521 [INFO] pytest resumed inside Job Object
+2026-03-17 13:00:51,207 [INFO] pytest exited with code 1 in 3.7s
+2026-03-17 13:00:51,207 [INFO] ============================================================
+2026-03-17 13:01:51,211 [INFO] ============================================================
+2026-03-17 13:01:51,211 [INFO] Test runner started — limit: 4096 MB
+2026-03-17 13:01:51,354 [INFO] GoPro detected: True
+2026-03-17 13:01:51,354 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/test_seamless_transition.py::TestMultipleReconnectCycles::test_three_cycles_seamless -v --tb=short
+2026-03-17 13:01:51,360 [INFO] Job Object created — memory limit: 4096 MB
+2026-03-17 13:01:51,375 [INFO] pytest spawned (PID 15052) — suspended, assigning to job ...
+2026-03-17 13:01:51,375 [INFO] pytest resumed inside Job Object
+2026-03-17 13:01:53,256 [INFO] pytest exited with code 0 in 1.9s
+2026-03-17 13:01:53,256 [INFO] ============================================================
+2026-03-17 13:01:59,418 [INFO] ============================================================
+2026-03-17 13:01:59,418 [INFO] Test runner started — limit: 4096 MB
+2026-03-17 13:01:59,555 [INFO] GoPro detected: True
+2026-03-17 13:01:59,555 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/ -q --tb=line
+2026-03-17 13:01:59,561 [INFO] Job Object created — memory limit: 4096 MB
+2026-03-17 13:01:59,577 [INFO] pytest spawned (PID 11996) — suspended, assigning to job ...
+2026-03-17 13:01:59,577 [INFO] pytest resumed inside Job Object
+2026-03-17 13:04:15,139 [INFO] pytest exited with code 0 in 135.6s
+2026-03-17 13:04:15,139 [INFO] ============================================================
+2026-03-17 15:39:16,188 [INFO] ============================================================
+2026-03-17 15:39:16,188 [INFO] Test runner started — limit: 4096 MB
+2026-03-17 15:39:16,334 [INFO] GoPro detected: False
+2026-03-17 15:39:16,334 [INFO] No GoPro connected — tests will be skipped by conftest.py. Use --force-run to override.
+2026-03-17 15:39:16,334 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/ -q --tb=line
+2026-03-17 15:39:16,340 [INFO] Job Object created — memory limit: 4096 MB
+2026-03-17 15:39:16,356 [INFO] pytest spawned (PID 11276) — suspended, assigning to job ...
+2026-03-17 15:39:16,356 [INFO] pytest resumed inside Job Object
+2026-03-17 15:39:17,843 [INFO] pytest exited with code 0 in 1.5s
+2026-03-17 15:39:17,843 [INFO] ============================================================
+2026-03-17 15:39:40,435 [INFO] ============================================================
+2026-03-17 15:39:40,435 [INFO] Test runner started — limit: 4096 MB
+2026-03-17 15:39:40,571 [INFO] GoPro detected: False
+2026-03-17 15:39:40,571 [INFO] Command: C:\Users\Jain\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe -m pytest tests/ -q --tb=line
+2026-03-17 15:39:40,577 [INFO] Job Object created — memory limit: 4096 MB
+2026-03-17 15:39:40,592 [INFO] pytest spawned (PID 20068) — suspended, assigning to job ...
+2026-03-17 15:39:40,592 [INFO] pytest resumed inside Job Object
+2026-03-17 15:41:50,340 [INFO] pytest exited with code 0 in 129.8s
+2026-03-17 15:41:50,340 [INFO] ============================================================
+2026-03-17 23:14:08,687 [INFO] ============================================================
+2026-03-17 23:14:08,687 [INFO] Test runner started — limit: 2048 MB
+2026-03-17 23:14:08,807 [INFO] GoPro detected: True
+2026-03-17 23:14:08,807 [INFO] Command: C:\Users\Jain\AppData\Local\uv\cache\archive-v0\E9pSclIV6bEm0XiiX2HD2\Scripts\python.exe -m pytest -xvs -k TestHealthMonitorPauseDuringSwap
+2026-03-17 23:14:08,850 [INFO] Job Object created — memory limit: 2048 MB
+2026-03-17 23:14:08,852 [INFO] pytest spawned (PID 248) — suspended, assigning to job ...
+2026-03-17 23:14:08,852 [INFO] pytest resumed inside Job Object
+2026-03-17 23:14:08,880 [INFO] pytest exited with code 1 in 0.1s
+2026-03-17 23:14:08,880 [INFO] ============================================================
+2026-03-17 23:15:08,758 [INFO] ============================================================
+2026-03-17 23:15:08,758 [INFO] Test runner started — limit: 2048 MB
+2026-03-17 23:15:08,878 [INFO] GoPro detected: True
+2026-03-17 23:15:08,878 [INFO] Command: C:\Users\Jain\AppData\Local\uv\cache\archive-v0\E9pSclIV6bEm0XiiX2HD2\Scripts\python.exe -m pytest -k "TestResetForRecovery or test_auto_recover_calls_reset_for_recovery" -v
+2026-03-17 23:15:08,886 [INFO] Job Object created — memory limit: 2048 MB
+2026-03-17 23:15:08,889 [INFO] pytest spawned (PID 3124) — suspended, assigning to job ...
+2026-03-17 23:15:08,889 [INFO] pytest resumed inside Job Object
+2026-03-17 23:15:08,918 [INFO] pytest exited with code 1 in 0.0s
+2026-03-17 23:15:08,919 [INFO] ============================================================
+2026-03-17 23:18:20,298 [INFO] ============================================================
+2026-03-17 23:18:20,298 [INFO] Test runner started — limit: 2048 MB
+2026-03-17 23:18:20,422 [INFO] GoPro detected: True
+2026-03-17 23:18:20,422 [INFO] Command: C:\Users\Jain\AppData\Local\uv\cache\archive-v0\E9pSclIV6bEm0XiiX2HD2\Scripts\python.exe -m pytest -xvs -k TestDetectBackend
+2026-03-17 23:18:20,431 [INFO] Job Object created — memory limit: 2048 MB
+2026-03-17 23:18:20,434 [INFO] pytest spawned (PID 10636) — suspended, assigning to job ...
+2026-03-17 23:18:20,434 [INFO] pytest resumed inside Job Object
+2026-03-17 23:18:20,463 [INFO] pytest exited with code 1 in 0.0s
+2026-03-17 23:18:20,463 [INFO] ============================================================
+2026-03-17 23:18:46,099 [INFO] ============================================================
+2026-03-17 23:18:46,099 [INFO] Test runner started — limit: 2048 MB
+2026-03-17 23:18:46,224 [INFO] GoPro detected: True
+2026-03-17 23:18:46,224 [INFO] Command: C:\Users\Jain\AppData\Local\uv\cache\archive-v0\E9pSclIV6bEm0XiiX2HD2\Scripts\python.exe -m pytest -xvs -k TestDetectBackend
+2026-03-17 23:18:46,233 [INFO] Job Object created — memory limit: 2048 MB
+2026-03-17 23:18:46,236 [INFO] pytest spawned (PID 5116) — suspended, assigning to job ...
+2026-03-17 23:18:46,236 [INFO] pytest resumed inside Job Object
+2026-03-17 23:18:47,691 [INFO] pytest exited with code 4 in 1.5s
+2026-03-17 23:18:47,691 [INFO] ============================================================
+2026-03-17 23:19:02,572 [INFO] ============================================================
+2026-03-17 23:19:02,572 [INFO] Test runner started — limit: 2048 MB
+2026-03-17 23:19:02,697 [INFO] GoPro detected: True
+2026-03-17 23:19:02,698 [INFO] Command: C:\Users\Jain\AppData\Local\uv\cache\archive-v0\E9pSclIV6bEm0XiiX2HD2\Scripts\python.exe -m pytest -xvs -k TestDetectBackend
+2026-03-17 23:19:02,706 [INFO] Job Object created — memory limit: 2048 MB
+2026-03-17 23:19:02,710 [INFO] pytest spawned (PID 11092) — suspended, assigning to job ...
+2026-03-17 23:19:02,710 [INFO] pytest resumed inside Job Object
+2026-03-17 23:19:04,880 [INFO] pytest exited with code 0 in 2.2s
+2026-03-17 23:19:04,880 [INFO] ============================================================
+2026-03-17 23:19:08,879 [INFO] ============================================================
+2026-03-17 23:19:08,879 [INFO] Test runner started — limit: 2048 MB
+2026-03-17 23:19:08,999 [INFO] GoPro detected: True
+2026-03-17 23:19:08,999 [INFO] Command: C:\Users\Jain\AppData\Local\uv\cache\archive-v0\E9pSclIV6bEm0XiiX2HD2\Scripts\python.exe -m pytest -xvs -k test_virtual_camera
+2026-03-17 23:19:09,007 [INFO] Job Object created — memory limit: 2048 MB
+2026-03-17 23:19:09,010 [INFO] pytest spawned (PID 2800) — suspended, assigning to job ...
+2026-03-17 23:19:09,010 [INFO] pytest resumed inside Job Object
+2026-03-17 23:19:10,169 [INFO] pytest exited with code 1 in 1.2s
+2026-03-17 23:19:10,169 [INFO] ============================================================
+2026-03-17 23:19:16,990 [INFO] ============================================================
+2026-03-17 23:19:16,990 [INFO] Test runner started — limit: 2048 MB
+2026-03-17 23:19:17,124 [INFO] GoPro detected: True
+2026-03-17 23:19:17,125 [INFO] Command: C:\Users\Jain\AppData\Local\uv\cache\archive-v0\E9pSclIV6bEm0XiiX2HD2\Scripts\python.exe -m pytest -xvs -k "TestDetectBackend or TestBackendSelection or test_virtual_camera_naming"
+2026-03-17 23:19:17,133 [INFO] Job Object created — memory limit: 2048 MB
+2026-03-17 23:19:17,137 [INFO] pytest spawned (PID 24832) — suspended, assigning to job ...
+2026-03-17 23:19:17,137 [INFO] pytest resumed inside Job Object
+2026-03-17 23:19:26,883 [INFO] pytest exited with code 1 in 9.8s
+2026-03-17 23:19:26,883 [INFO] ============================================================
+2026-03-17 23:19:32,365 [INFO] ============================================================
+2026-03-17 23:19:32,365 [INFO] Test runner started — limit: 2048 MB
+2026-03-17 23:19:32,497 [INFO] GoPro detected: True
+2026-03-17 23:19:32,497 [INFO] Command: C:\Users\Jain\AppData\Local\uv\cache\archive-v0\E9pSclIV6bEm0XiiX2HD2\Scripts\python.exe -m pytest -xvs -k TestDetectBackend
+2026-03-17 23:19:32,506 [INFO] Job Object created — memory limit: 2048 MB
+2026-03-17 23:19:32,509 [INFO] pytest spawned (PID 10204) — suspended, assigning to job ...
+2026-03-17 23:19:32,509 [INFO] pytest resumed inside Job Object
+2026-03-17 23:19:33,419 [INFO] pytest exited with code 0 in 0.9s
+2026-03-17 23:19:33,419 [INFO] ============================================================

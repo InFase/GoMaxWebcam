@@ -1,0 +1,1 @@
+# GoPro Bridge source package
