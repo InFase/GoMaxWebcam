@@ -381,16 +381,40 @@ class TestUsbModeSwitchEdgeCases(unittest.TestCase):
         self.assertTrue(result)
 
     @patch("gopro_connection.requests.get")
-    def test_enable_http_500(self, mock_get):
-        """Handle HTTP 500 error from camera."""
+    def test_enable_http_500_with_parseable_body(self, mock_get):
+        """HTTP 500 with parseable error body is treated as non-fatal.
+
+        GoPro returns useful data in error responses (e.g. supported_settings
+        on 400). When _api_get can parse the error body, enable_wired_usb_control
+        treats it like a non-zero error code — may already be enabled, so proceed.
+        """
         import requests
         mock_resp = MagicMock()
         mock_resp.raise_for_status.side_effect = requests.HTTPError("500 Server Error")
+        mock_resp.json.return_value = {"error": 2}
         mock_get.return_value = mock_resp
 
         result = self.conn.enable_wired_usb_control()
 
-        # _api_get returns None on HTTPError, so enable returns False
+        # Non-zero error from parsed body → treated as non-fatal (already enabled)
+        self.assertTrue(result)
+
+    @patch("gopro_connection.requests.get")
+    def test_enable_http_500_unparseable_body(self, mock_get):
+        """HTTP 500 with unparseable body returns False (camera not responding).
+
+        When the error response body can't be parsed as JSON, _api_get returns
+        None, and enable_wired_usb_control returns False.
+        """
+        import requests
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.side_effect = requests.HTTPError("500 Server Error")
+        mock_resp.json.side_effect = ValueError("No JSON")
+        mock_get.return_value = mock_resp
+
+        result = self.conn.enable_wired_usb_control()
+
+        # _api_get returns None when body can't be parsed → False
         self.assertFalse(result)
 
     @patch("gopro_connection.requests.get")

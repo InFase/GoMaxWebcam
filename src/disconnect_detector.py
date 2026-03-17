@@ -7,7 +7,7 @@ of the last good decoded video frame BEFORE the stream degrades.
 Detection signals (fastest to slowest):
   1. USB device removal event (via USBEventListener on_detach) — ~instant
   2. ffmpeg process exit / stream EOF (StreamReader returns None) — 0.5-3s
-  3. Keep-alive HTTP failures (GoProConnection) — 16-24s (3 failures × 8s)
+  3. Keep-alive HTTP failures (GoProConnection) — 5-7.5s (3 failures × 2.5s)
 
 This module bridges signal #1 (instant USB detach) to the FramePipeline's
 freeze-frame mechanism, ensuring the virtual camera captures the last good
@@ -73,6 +73,7 @@ class DisconnectDetector:
         connection=None,
         stream_reader=None,
         config=None,
+        usb_listener=None,
     ):
         """Initialize the disconnect detector.
 
@@ -81,14 +82,19 @@ class DisconnectDetector:
             connection: GoProConnection instance — state checked for disconnect confirmation.
             stream_reader: StreamReader instance — monitored for process death.
             config: Config instance — for timing parameters.
+            usb_listener: Optional external USBEventListener instance. When provided,
+                the detector will NOT create its own listener — USB events should be
+                forwarded via handle_usb_attach()/handle_usb_detach() from the owner.
+                This enables a single USBEventListener to fan out to multiple consumers.
         """
         self._pipeline = pipeline
         self._connection = connection
         self._stream_reader = stream_reader
         self._config = config
 
-        # USB event listener (lazy-imported to avoid import errors on non-Windows)
+        # USB event listener — either externally owned or created internally
         self._usb_listener = None
+        self._external_usb_listener = usb_listener is not None
 
         # State
         self._running = False
@@ -213,9 +219,20 @@ class DisconnectDetector:
     def _start_usb_listener(self) -> bool:
         """Initialize and start the USB event listener.
 
+        If an external USB listener was provided at construction time,
+        this is a no-op — the owner is responsible for starting it and
+        forwarding events via handle_usb_attach()/handle_usb_detach().
+
         Returns:
-            True if the listener started successfully.
+            True if USB events will be received (either external or internal).
         """
+        if self._external_usb_listener:
+            log.debug(
+                "[EVENT:disconnect_detector] Using external USB listener "
+                "(events forwarded via handle_usb_attach/handle_usb_detach)"
+            )
+            return True
+
         try:
             from usb_event_listener import USBEventListener
 
@@ -239,7 +256,15 @@ class DisconnectDetector:
             return False
 
     def _stop_usb_listener(self):
-        """Stop the USB event listener if active."""
+        """Stop the USB event listener if active.
+
+        Only stops internally-created listeners. External listeners are
+        owned by the caller (e.g. AppController) and not stopped here.
+        """
+        if self._external_usb_listener:
+            log.debug("[EVENT:disconnect_detector] External USB listener — not stopping (owned by caller)")
+            return
+
         if self._usb_listener is not None:
             try:
                 self._usb_listener.stop()
@@ -337,6 +362,30 @@ class DisconnectDetector:
                 self.on_reconnect_ready(device_id)
             except Exception:
                 log.exception("Error in on_reconnect_ready callback")
+
+    # -- Public USB Event Forwarding -----------------------------------------
+
+    def handle_usb_attach(self, device_id: str):
+        """Public entry point for USB attach events from an external listener.
+
+        When a single USBEventListener fans out to multiple consumers,
+        the owner calls this method to forward attach events to this detector.
+
+        Args:
+            device_id: The USB device path string from Windows.
+        """
+        self._on_usb_attach(device_id)
+
+    def handle_usb_detach(self, device_id: str):
+        """Public entry point for USB detach events from an external listener.
+
+        When a single USBEventListener fans out to multiple consumers,
+        the owner calls this method to forward detach events to this detector.
+
+        Args:
+            device_id: The USB device path string from Windows.
+        """
+        self._on_usb_detach(device_id)
 
     # -- Freeze-Frame Trigger ------------------------------------------------
 

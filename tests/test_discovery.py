@@ -790,8 +790,15 @@ class TestConstants(unittest.TestCase):
     """Verify critical constants match the spec."""
 
     def test_vendor_id(self):
-        self.assertEqual(GOPRO_VENDOR_ID, 0x0A70)
-        self.assertEqual(GOPRO_VENDOR_ID, 2672)
+        self.assertEqual(GOPRO_VENDOR_ID, 0x2672)
+        self.assertEqual(GOPRO_VENDOR_ID, 9842)
+
+    def test_vendor_ids_set_includes_both_known_vids(self):
+        """GOPRO_VENDOR_IDS must include both 0x2672 (Hero 12+) and 0x0A70 (older)."""
+        from src.discovery import GOPRO_VENDOR_IDS
+        self.assertIn(0x2672, GOPRO_VENDOR_IDS)
+        self.assertIn(0x0A70, GOPRO_VENDOR_IDS)
+        self.assertEqual(len(GOPRO_VENDOR_IDS), 2)
 
     def test_known_pids_is_set(self):
         self.assertIsInstance(GOPRO_KNOWN_PIDS, set)

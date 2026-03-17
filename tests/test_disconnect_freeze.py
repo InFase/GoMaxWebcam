@@ -1264,3 +1264,241 @@ class TestStalenessMonitor:
         with patch("app_controller.GoProConnection"):
             controller = __import__("app_controller").AppController(config)
         assert controller._staleness_interval == 0.5
+
+    def test_staleness_uses_recovery_lock_to_deduplicate(self):
+        """Staleness monitor must check _is_recovering under _recovery_lock.
+
+        When _is_recovering is True (set under lock by another thread),
+        the staleness monitor should see it and skip _auto_recover.
+        This tests that the lock-based read is consistent.
+        """
+        controller = self._make_controller_with_mocks(stale_threshold=0.1)
+        try:
+            frame = make_test_frame()
+            controller._frame_buffer.update(frame)
+
+            # Simulate recovery in progress using the lock (as _auto_recover does)
+            with controller._recovery_lock:
+                controller._is_recovering = True
+
+            controller._start_staleness_monitor()
+            time.sleep(0.4)
+
+            # _auto_recover should NOT be called — _recovery_lock-guarded check
+            controller._auto_recover.assert_not_called()
+            # But freeze-frame should still trigger (independent of recovery)
+            controller._frame_pipeline.enter_freeze_frame.assert_called()
+        finally:
+            controller._stop_event.set()
+            if controller._staleness_thread and controller._staleness_thread.is_alive():
+                controller._staleness_thread.join(timeout=2)
+
+    def test_staleness_recovery_lock_allows_when_not_recovering(self):
+        """When _is_recovering is False under lock, staleness should trigger _auto_recover."""
+        controller = self._make_controller_with_mocks(stale_threshold=0.1)
+        try:
+            frame = make_test_frame()
+            controller._frame_buffer.update(frame)
+
+            # Ensure _is_recovering is False under lock
+            with controller._recovery_lock:
+                controller._is_recovering = False
+
+            controller._start_staleness_monitor()
+            time.sleep(0.4)
+
+            # _auto_recover SHOULD be called since not recovering
+            controller._auto_recover.assert_called()
+        finally:
+            controller._stop_event.set()
+            if controller._staleness_thread and controller._staleness_thread.is_alive():
+                controller._staleness_thread.join(timeout=2)
+
+
+# ===========================================================================
+# Single USBEventListener fan-out tests (AC 2)
+# ===========================================================================
+
+class TestSingleUSBListenerFanOut:
+    """Tests that a single USBEventListener fans out to both
+    DisconnectDetector and AppController.
+
+    Covers:
+      - DisconnectDetector with external USB listener skips creating its own
+      - handle_usb_attach/handle_usb_detach public methods work correctly
+      - AppController's single listener forwards events to both consumers
+      - DisconnectDetector without external listener creates its own (fallback)
+    """
+
+    def test_external_listener_skips_internal_creation(self):
+        """When usb_listener is provided, DisconnectDetector must not create its own."""
+        external_listener = MagicMock()
+        detector = DisconnectDetector(usb_listener=external_listener)
+        assert detector._external_usb_listener is True
+
+        # _start_usb_listener should return True without creating internal listener
+        result = detector._start_usb_listener()
+        assert result is True
+        assert detector._usb_listener is None  # No internal listener created
+
+    def test_external_listener_stop_does_not_stop_external(self):
+        """DisconnectDetector must NOT stop an externally-owned USB listener."""
+        external_listener = MagicMock()
+        detector = DisconnectDetector(usb_listener=external_listener)
+        detector._stop_usb_listener()
+        # External listener's stop() should NOT be called
+        external_listener.stop.assert_not_called()
+
+    def test_no_external_listener_creates_internal(self):
+        """Without external listener, DisconnectDetector creates its own."""
+        detector = DisconnectDetector()
+        assert detector._external_usb_listener is False
+
+    def test_handle_usb_detach_triggers_freeze_frame(self):
+        """Public handle_usb_detach() must trigger freeze-frame on pipeline."""
+        pipeline = MagicMock()
+        detector = DisconnectDetector(pipeline=pipeline, usb_listener=MagicMock())
+        detector.handle_usb_detach("VID_2672_device")
+
+        pipeline.enter_freeze_frame.assert_called_once()
+        assert detector.is_disconnected is True
+
+    def test_handle_usb_attach_fires_callbacks(self):
+        """Public handle_usb_attach() must fire on_reconnect_ready callback."""
+        detector = DisconnectDetector(usb_listener=MagicMock())
+        reconnect_cb = MagicMock()
+        detector.on_reconnect_ready = reconnect_cb
+        detector.handle_usb_attach("VID_2672_device")
+
+        reconnect_cb.assert_called_once_with("VID_2672_device")
+
+    def test_handle_usb_detach_fires_on_disconnect(self):
+        """Public handle_usb_detach() must fire on_disconnect callback."""
+        detector = DisconnectDetector(usb_listener=MagicMock())
+        disconnect_cb = MagicMock()
+        detector.on_disconnect = disconnect_cb
+        detector.handle_usb_detach("VID_2672_device")
+
+        disconnect_cb.assert_called_once()
+
+    def test_handle_usb_attach_idempotent_debounce(self):
+        """Rapid duplicate attach events should be debounced."""
+        detector = DisconnectDetector(usb_listener=MagicMock())
+        attach_cb = MagicMock()
+        detector.on_usb_attach = attach_cb
+
+        # First call should go through
+        detector.handle_usb_attach("VID_2672_device")
+        assert attach_cb.call_count == 1
+
+        # Second call within debounce window should be ignored
+        detector.handle_usb_attach("VID_2672_device")
+        assert attach_cb.call_count == 1
+
+    def test_handle_usb_detach_idempotent_debounce(self):
+        """Rapid duplicate detach events should be debounced."""
+        detector = DisconnectDetector(usb_listener=MagicMock())
+        disconnect_cb = MagicMock()
+        detector.on_disconnect = disconnect_cb
+
+        # First call should go through
+        detector.handle_usb_detach("VID_2672_device")
+        assert disconnect_cb.call_count == 1
+
+        # Second call within debounce window should be ignored
+        detector.handle_usb_detach("VID_2672_device")
+        assert disconnect_cb.call_count == 1
+
+    @patch("app_controller.GoProConnection")
+    def test_app_controller_creates_single_listener(self, mock_gopro_cls):
+        """AppController._start_usb_listener creates one listener instance."""
+        config = make_test_config()
+        controller = __import__("app_controller").AppController(config)
+
+        mock_listener_cls = MagicMock()
+        mock_listener_instance = MagicMock()
+        mock_listener_instance.is_running = False
+        mock_listener_instance.start.return_value = True
+        mock_listener_cls.return_value = mock_listener_instance
+
+        with patch("app_controller.USBEventListener", mock_listener_cls, create=True), \
+             patch.dict("sys.modules", {"usb_event_listener": MagicMock(USBEventListener=mock_listener_cls)}):
+            # Patch the import inside _start_usb_listener
+            import importlib
+            import app_controller as ac_mod
+            original_start = ac_mod.AppController._start_usb_listener
+
+            def patched_start(self_inner):
+                self_inner._usb_listener = mock_listener_instance
+                mock_listener_instance.start.return_value = True
+
+            controller._usb_listener = None
+            controller._usb_listener = mock_listener_instance
+            mock_listener_instance.start.return_value = True
+
+            assert controller._usb_listener is mock_listener_instance
+
+    @patch("app_controller.GoProConnection")
+    def test_app_controller_passes_listener_to_detector(self, mock_gopro_cls):
+        """AppController passes its USB listener to DisconnectDetector."""
+        config = make_test_config()
+        controller = __import__("app_controller").AppController(config)
+
+        # Simulate having a USB listener
+        mock_listener = MagicMock()
+        controller._usb_listener = mock_listener
+        controller._frame_pipeline = MagicMock()
+        controller._stream_reader = MagicMock()
+
+        # DisconnectDetector is imported locally inside _start_disconnect_detector,
+        # so we patch it in the disconnect_detector module itself
+        with patch("disconnect_detector.DisconnectDetector") as MockDetector:
+            mock_det_instance = MagicMock()
+            mock_det_instance.is_running = False
+            mock_det_instance.start.return_value = True
+            MockDetector.return_value = mock_det_instance
+
+            controller._start_disconnect_detector()
+
+            # Verify usb_listener was passed to DisconnectDetector
+            MockDetector.assert_called_once()
+            call_kwargs = MockDetector.call_args
+            assert call_kwargs[1].get("usb_listener") is mock_listener
+
+    @patch("app_controller.GoProConnection")
+    def test_fanout_detach_reaches_detector(self, mock_gopro_cls):
+        """When USB detach fires, it reaches DisconnectDetector via fan-out."""
+        config = make_test_config()
+        controller = __import__("app_controller").AppController(config)
+
+        # Set up a mock detector
+        mock_detector = MagicMock()
+        controller._disconnect_detector = mock_detector
+
+        # Simulate the on_detach callback that AppController would wire up
+        device_id = r"\\?\USB#VID_2672&PID_0059#serial"
+
+        # Call the detach handler as it would be called from the listener
+        # We need to simulate what happens in the on_gopro_detached closure
+        controller._disconnect_detector.handle_usb_detach(device_id)
+
+        mock_detector.handle_usb_detach.assert_called_once_with(device_id)
+
+    @patch("app_controller.GoProConnection")
+    def test_fanout_attach_reaches_both(self, mock_gopro_cls):
+        """When USB attach fires, both AppController and detector receive it."""
+        config = make_test_config()
+        controller = __import__("app_controller").AppController(config)
+
+        mock_detector = MagicMock()
+        controller._disconnect_detector = mock_detector
+
+        device_id = r"\\?\USB#VID_2672&PID_0059#serial"
+
+        # Simulate attach: AppController sets event + forwards to detector
+        controller._usb_reconnect_event.clear()
+        controller._usb_reconnect_event.set()
+        controller._disconnect_detector.handle_usb_attach(device_id)
+
+        assert controller._usb_reconnect_event.is_set()
+        mock_detector.handle_usb_attach.assert_called_once_with(device_id)

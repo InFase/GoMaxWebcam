@@ -646,6 +646,23 @@ class TestAppControllerPollerIntegration:
             ctrl._start_usb_poller()
             mock_cls.assert_not_called()  # Should NOT create a new one
 
+    @_usb_listener_patch
+    @patch('app_controller.GoProConnection')
+    def test_usb_listener_and_poller_coexist(self, mock_gopro_cls, mock_usb):
+        """AppController uses both USBEventListener and USBDevicePoller.
+
+        The event listener provides instant USB detection while the poller
+        provides reliable fallback detection. Both must coexist without
+        interference (AC 2: single listener fans out to multiple consumers).
+        """
+        from app_controller import AppController
+        config = make_test_config()
+        ctrl = AppController(config)
+
+        # Both should be accessible attributes
+        assert hasattr(ctrl, '_usb_poller')
+        assert hasattr(ctrl, '_usb_listener')
+
 
 # ===========================================================================
 # Tests: Polling loop thread safety

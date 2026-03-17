@@ -744,3 +744,82 @@ class TestUSBDetectionReliability:
             listener._handle_device_change(DBT_DEVICEREMOVECOMPLETE, 1)  # Should still work
 
         assert len(detach_calls) == 1
+
+    def test_fan_out_to_multiple_consumers(self):
+        """A single USBEventListener can fan out events to multiple consumers.
+
+        This is the pattern used by AppController (AC 2): one listener instance
+        fans out to both DisconnectDetector.handle_usb_detach() and
+        AppController._on_usb_disconnect(). Verify callbacks handle this correctly.
+        """
+        consumer_a_attach = []
+        consumer_b_attach = []
+        consumer_a_detach = []
+        consumer_b_detach = []
+
+        def fan_out_attach(device_id):
+            consumer_a_attach.append(device_id)
+            consumer_b_attach.append(device_id)
+
+        def fan_out_detach(device_id):
+            consumer_a_detach.append(device_id)
+            consumer_b_detach.append(device_id)
+
+        listener = USBEventListener(
+            on_attach=fan_out_attach,
+            on_detach=fan_out_detach,
+        )
+
+        gopro_path = r"\\?\USB#VID_2672&PID_0059#serial#{guid}"
+
+        with patch("usb_event_listener._extract_device_name", return_value=gopro_path), \
+             patch("usb_event_listener.ctypes") as mock_ctypes:
+            mock_hdr = MagicMock()
+            mock_hdr.contents.dbch_devicetype = DBT_DEVTYP_DEVICEINTERFACE
+            mock_ctypes.cast.return_value = mock_hdr
+            mock_ctypes.POINTER = ctypes.POINTER
+
+            listener._handle_device_change(DBT_DEVICEARRIVAL, 1)
+            listener._handle_device_change(DBT_DEVICEREMOVECOMPLETE, 1)
+
+        # Both consumers received both events
+        assert len(consumer_a_attach) == 1
+        assert len(consumer_b_attach) == 1
+        assert len(consumer_a_detach) == 1
+        assert len(consumer_b_detach) == 1
+
+    def test_fan_out_one_consumer_error_doesnt_block_others(self):
+        """When fan-out callback raises, events are still dispatched.
+
+        In the fan-out pattern, if one consumer's handler raises (e.g.,
+        DisconnectDetector), the exception is caught and the next event
+        still fires for other consumers.
+        """
+        consumer_b_calls = []
+        call_count = [0]
+
+        def fan_out_attach(device_id):
+            call_count[0] += 1
+            # First consumer fails
+            if call_count[0] == 1:
+                raise RuntimeError("consumer A error")
+            # This won't run on same call, but on a second event it will
+            consumer_b_calls.append(device_id)
+
+        listener = USBEventListener(on_attach=fan_out_attach)
+
+        gopro_path = r"\\?\USB#VID_0A70&PID_000D#serial#{guid}"
+
+        with patch("usb_event_listener._extract_device_name", return_value=gopro_path), \
+             patch("usb_event_listener.ctypes") as mock_ctypes:
+            mock_hdr = MagicMock()
+            mock_hdr.contents.dbch_devicetype = DBT_DEVTYP_DEVICEINTERFACE
+            mock_ctypes.cast.return_value = mock_hdr
+            mock_ctypes.POINTER = ctypes.POINTER
+
+            # First call raises — exception caught by listener
+            listener._handle_device_change(DBT_DEVICEARRIVAL, 1)
+            # Second call should still work
+            listener._handle_device_change(DBT_DEVICEARRIVAL, 1)
+
+        assert len(consumer_b_calls) == 1  # Second call succeeded
