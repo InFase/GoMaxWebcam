@@ -69,6 +69,7 @@ def mock_controller():
     ctrl.on_state_change = None
     ctrl.on_status = None
     ctrl.on_camera_info = None
+    ctrl.on_active_port = None
     ctrl.status_history = []
     ctrl.retry_connection = MagicMock()
     ctrl.stop = MagicMock()
@@ -425,12 +426,54 @@ class TestDashboardControllerWiring:
         assert mock_controller.on_state_change is not None
         assert mock_controller.on_status is not None
         assert mock_controller.on_camera_info is not None
+        assert mock_controller.on_active_port is not None
 
     def test_stop_button_calls_controller(self, dashboard, mock_controller):
         """Clicking stop calls controller.stop()."""
         QTest.mouseClick(dashboard._stop_btn, Qt.MouseButton.LeftButton)
         QApplication.processEvents()
         mock_controller.stop.assert_called_once()
+
+
+class TestDashboardActivePortIndicator:
+    """Test the read-only active port indicator in the dashboard header."""
+
+    def test_port_label_hidden_initially(self, dashboard):
+        """Port label is hidden before any port is selected."""
+        assert dashboard.port_label.isHidden()
+
+    def test_port_label_shown_after_active_port(self, dashboard):
+        """Port label becomes visible when active port is set."""
+        dashboard._on_active_port(8554)
+        QApplication.processEvents()
+        assert not dashboard.port_label.isHidden()
+        assert "8554" in dashboard.port_label.text()
+
+    def test_port_label_shows_auto_selected_port(self, dashboard):
+        """Port label shows the auto-selected port (not the configured one)."""
+        dashboard._on_active_port(8555)
+        QApplication.processEvents()
+        assert "8555" in dashboard.port_label.text()
+
+    def test_port_label_updates_on_new_port(self, dashboard):
+        """Port label updates when active port changes."""
+        dashboard._on_active_port(8554)
+        QApplication.processEvents()
+        assert "8554" in dashboard.port_label.text()
+
+        dashboard._on_active_port(8556)
+        QApplication.processEvents()
+        assert "8556" in dashboard.port_label.text()
+        assert "8554" not in dashboard.port_label.text()
+
+    def test_port_label_is_read_only(self, dashboard):
+        """Port label is a QLabel (not editable), separate from config spinner."""
+        from PyQt6.QtWidgets import QLabel
+        assert isinstance(dashboard.port_label, QLabel)
+
+    def test_port_label_accessible_via_property(self, dashboard):
+        """Port label is accessible via the public port_label property."""
+        assert dashboard.port_label is dashboard._port_label
 
 
 if __name__ == "__main__":

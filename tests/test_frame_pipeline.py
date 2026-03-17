@@ -54,7 +54,7 @@ def make_test_config(**overrides) -> Config:
 
 
 def make_test_frame(width=320, height=240, color=(128, 64, 32)):
-    """Create a test RGB24 frame as numpy array."""
+    """Create a test BGR24 frame as numpy array."""
     frame = np.zeros((height, width, 3), dtype=np.uint8)
     frame[:, :] = color
     return frame
@@ -256,8 +256,14 @@ class TestFramePushing:
 
         assert pipeline.frames_pushed >= 5
 
-    def test_sleep_until_next_frame_called(self):
-        """Pipeline should call vcam.sleep_until_next_frame for FPS pacing."""
+    def test_fps_pacing_via_blocking_read(self):
+        """Pipeline relies on blocking read_frame() for FPS pacing, not explicit sleep.
+
+        The pipeline does NOT call vcam.sleep_until_next_frame() because
+        read_frame() blocks until ffmpeg delivers the next frame, which is
+        already rate-limited by the GoPro's output cadence. Adding explicit
+        sleep on top would double the per-frame delay.
+        """
         config = make_test_config()
         pipeline = FramePipeline(config)
 
@@ -269,8 +275,9 @@ class TestFramePushing:
         time.sleep(0.2)
         pipeline.stop()
 
-        # Sleep should have been called at least once per frame
-        assert vcam.sleep_calls >= 3
+        # Pipeline should NOT call sleep_until_next_frame — FPS pacing
+        # comes from read_frame() blocking on the ffmpeg pipe.
+        assert vcam.sleep_calls == 0
 
 
 class TestFreezeFrame:

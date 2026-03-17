@@ -34,7 +34,7 @@ pytestmark = pytest.mark.no_gopro_needed
 # ---------------------------------------------------------------------------
 
 def make_frame(width=320, height=240, color=(128, 64, 32)):
-    """Create a test RGB24 frame."""
+    """Create a test BGR24 frame."""
     frame = np.full((height, width, 3), color, dtype=np.uint8)
     return frame
 
@@ -154,20 +154,32 @@ class TestFrameStorage:
         stored = buf.get_frame()
         np.testing.assert_array_equal(stored, frame)
 
-    def test_update_makes_copy(self):
-        """update() makes a copy — modifying original doesn't affect buffer."""
+    def test_update_stores_reference_not_copy(self):
+        """update() stores the frame by reference (no copy) for performance.
+
+        Since read_frame() creates a fresh numpy array each time via
+        np.frombuffer, there's no aliasing risk. Avoiding the copy saves
+        ~6MB/frame of allocation at 30fps.
+
+        Note: Modifying the original array WILL affect the stored frame.
+        This is expected behavior — callers should not mutate frames after
+        passing them to update().
+        """
         buf = FrameBuffer(width=320, height=240)
         buf.start()
 
         frame = make_frame(color=(100, 100, 100))
         buf.update(frame)
 
-        # Modify the original
-        frame[:, :] = (0, 0, 0)
-
-        # Buffer should still have the original data
+        # The stored frame IS the same object (no copy made)
         stored = buf.get_frame()
-        assert tuple(stored[0, 0]) == (100, 100, 100)
+        assert stored is frame
+
+        # Modifying the original also modifies the stored frame
+        # (this is intentional — no-copy for performance)
+        frame[:, :] = (0, 0, 0)
+        stored2 = buf.get_frame()
+        assert tuple(stored2[0, 0]) == (0, 0, 0)
 
     def test_get_frame_returns_same_reference(self):
         """get_frame() returns the internal frame (not a copy) for performance."""

@@ -46,6 +46,7 @@ class MockConfig:
     idle_reset_delay: float = 0.01  # Fast for tests
     keepalive_interval: float = 0.1
     reconnect_delay: float = 0.01
+    reconnect_max_delay: float = 30.0
     ncm_adapter_wait: float = 0.01
     discovery_retry_interval: float = 0.01
     discovery_max_retries: int = 3
@@ -59,11 +60,16 @@ class MockConfig:
     auto_connect_on_launch: bool = True
     health_check_interval: float = 5.0
     reconnect_max_retries: int = 0
+    stale_poll_interval: float = 0.5
+    ffmpeg_debug: bool = False
+    stream_startup_timeout: float = 10.0
+    ffmpeg_port_release_delay: float = 0.5
     log_level: str = "INFO"
     log_max_session_files: int = 5
     log_max_total_bytes: int = 50 * 1024 * 1024
     log_max_file_bytes: int = 10 * 1024 * 1024
     _config_path: str = ""
+    _preferred_udp_port: int = 0
 
     def save(self):
         pass
@@ -85,16 +91,17 @@ class TestResolutionConstants(unittest.TestCase):
     """Test RESOLUTION_MAP and VALID_RESOLUTIONS constants."""
 
     def test_resolution_map_has_all_codes(self):
-        """RESOLUTION_MAP contains 720p, 1080p, and 4K."""
+        """RESOLUTION_MAP contains 720p and 1080p codes."""
         self.assertIn(7, RESOLUTION_MAP)    # 720p
         self.assertIn(4, RESOLUTION_MAP)    # 1080p
-        self.assertIn(12, RESOLUTION_MAP)   # 4K
+        self.assertIn(12, RESOLUTION_MAP)   # 1080p (Hero 13 code)
 
     def test_resolution_map_dimensions(self):
         """Each resolution maps to correct (width, height, label)."""
         self.assertEqual(RESOLUTION_MAP[7], (1280, 720, "720p"))
         self.assertEqual(RESOLUTION_MAP[4], (1920, 1080, "1080p"))
-        self.assertEqual(RESOLUTION_MAP[12], (3840, 2160, "4K"))
+        # Hero 13 uses code 12 for 1080p (not 4K)
+        self.assertEqual(RESOLUTION_MAP[12], (1920, 1080, "1080p"))
 
     def test_valid_resolutions_matches_map(self):
         """VALID_RESOLUTIONS matches RESOLUTION_MAP keys."""
@@ -146,8 +153,8 @@ class TestNeedsResolutionChange(unittest.TestCase):
         self.gopro._current_fov = 4
         self.assertFalse(self.gopro.needs_resolution_change(4, fov=None))
 
-    def test_change_needed_4k_to_720p(self):
-        """4K to 720p is detected as a change."""
+    def test_change_needed_1080p_hero13_to_720p(self):
+        """1080p (Hero 13 code 12) to 720p is detected as a change."""
         self.gopro._current_resolution = 12
         self.gopro._current_fov = 0
         self.assertTrue(self.gopro.needs_resolution_change(7))

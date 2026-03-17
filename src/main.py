@@ -207,9 +207,11 @@ def main():
     )
     log.info(
         "[EVENT:startup] Recovery: keepalive=%.1fs, reconnect_delay=%.1fs, "
-        "ncm_adapter_wait=%.1fs, max_retries=%s, discovery_timeout=%.1fs",
+        "reconnect_max_delay=%.1fs, ncm_adapter_wait=%.1fs, "
+        "stale_poll_interval=%.1fs, max_retries=%s, discovery_timeout=%.1fs",
         config.keepalive_interval, config.reconnect_delay,
-        config.ncm_adapter_wait,
+        config.reconnect_max_delay, config.ncm_adapter_wait,
+        config.stale_poll_interval,
         config.reconnect_max_retries if config.reconnect_max_retries > 0 else "infinite",
         config.discovery_overall_timeout,
     )

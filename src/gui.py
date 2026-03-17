@@ -776,6 +776,7 @@ class DashboardWindow(QMainWindow):
     _sig_status_message = pyqtSignal(str, str)  # (message, level)
     _sig_camera_info = pyqtSignal(dict)         # camera info dict
     _sig_webcam_mode_failed = pyqtSignal(str)   # reason string
+    _sig_active_port = pyqtSignal(int)          # active UDP port
 
     def __init__(self, controller: AppController, config: Optional[Config] = None,
                  parent: Optional[QWidget] = None):
@@ -836,6 +837,12 @@ class DashboardWindow(QMainWindow):
         self._battery_label.setStyleSheet("color: #A0A0A0; font-size: 12px;")
         self._battery_label.setVisible(False)
         header.addWidget(self._battery_label)
+
+        # Active port label (read-only, hidden until port is selected)
+        self._port_label = QLabel("")
+        self._port_label.setStyleSheet("color: #A0A0A0; font-size: 12px;")
+        self._port_label.setVisible(False)
+        header.addWidget(self._port_label)
 
         # Settings gear button
         self._settings_btn = QPushButton("⚙")
@@ -920,6 +927,7 @@ class DashboardWindow(QMainWindow):
         self._sig_status_message.connect(self._on_status_message)
         self._sig_camera_info.connect(self._on_camera_info)
         self._sig_webcam_mode_failed.connect(self._on_webcam_mode_failed)
+        self._sig_active_port.connect(self._on_active_port)
         self._retry_widget.retry_requested.connect(self._on_retry_requested)
 
     def _wire_controller(self):
@@ -932,6 +940,7 @@ class DashboardWindow(QMainWindow):
         self.controller.on_status = lambda msg, lvl: self._sig_status_message.emit(msg, lvl)
         self.controller.on_camera_info = lambda info: self._sig_camera_info.emit(info)
         self.controller.on_webcam_mode_failed = lambda reason: self._sig_webcam_mode_failed.emit(reason)
+        self.controller.on_active_port = lambda port: self._sig_active_port.emit(port)
 
     # ── Slot methods (run on main thread) ────────────────────────────
 
@@ -1017,6 +1026,18 @@ class DashboardWindow(QMainWindow):
         self._manual_guide.show_guide(reason)
         log.info("[EVENT:manual_guide] Showing manual mode guide: %s", reason[:80])
 
+    @pyqtSlot(int)
+    def _on_active_port(self, port: int):
+        """Show the active UDP port in the header (read-only indicator).
+
+        This is separate from the port spinner in SettingsPanel — the spinner
+        controls the *configured* port, while this label shows the port
+        actually in use (which may differ after ephemeral auto-selection).
+        """
+        self._port_label.setText(f"Port {port}")
+        self._port_label.setVisible(True)
+        log.debug("[EVENT:active_port] Active port indicator set to %d", port)
+
     # ── Button handlers ──────────────────────────────────────────────
 
     @pyqtSlot()
@@ -1065,6 +1086,11 @@ class DashboardWindow(QMainWindow):
     def manual_guide(self) -> ManualModeGuide:
         """Access the manual mode guide widget (for testing)."""
         return self._manual_guide
+
+    @property
+    def port_label(self) -> QLabel:
+        """Access the active port label widget (for testing)."""
+        return self._port_label
 
     def closeEvent(self, event):
         """Handle window close — stop the controller gracefully."""

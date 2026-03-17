@@ -10,7 +10,7 @@ Tests verify that:
   5. Freeze-frame recovery uses FrameBuffer correctly
   6. AppController._start_streaming_pipeline() wires all components together
   7. Pipeline stats include resolution, FPS match, and frame buffer info
-  8. Frame format (RGB24, uint8, correct shape) is preserved through the pipeline
+  8. Frame format (BGR24, uint8, correct shape) is preserved through the pipeline
 """
 
 import sys
@@ -55,7 +55,7 @@ def make_test_config(**overrides) -> Config:
 
 
 def make_test_frame(width=320, height=240, color=(128, 64, 32)):
-    """Create a test RGB24 frame as numpy array."""
+    """Create a test BGR24 frame as numpy array."""
     frame = np.zeros((height, width, 3), dtype=np.uint8)
     frame[:, :] = color
     return frame
@@ -328,7 +328,7 @@ class TestResolutionValidation:
 # ---------------------------------------------------------------------------
 
 class TestFrameFormat:
-    """Tests for frame format (RGB24, uint8, shape) through the pipeline."""
+    """Tests for frame format (BGR24, uint8, shape) through the pipeline."""
 
     def test_frame_shape_preserved(self):
         """Frame shape (H, W, 3) is preserved through the pipeline."""
@@ -409,8 +409,13 @@ class TestFrameFormat:
 class TestFPSPacing:
     """Tests for frame rate pacing through the pipeline."""
 
-    def test_sleep_called_for_pacing(self):
-        """VirtualCamera.sleep_until_next_frame() is called for FPS pacing."""
+    def test_no_explicit_sleep_pacing(self):
+        """Pipeline relies on blocking read_frame() for FPS pacing, not explicit sleep.
+
+        The pipeline does NOT call vcam.sleep_until_next_frame() because
+        read_frame() blocks on the ffmpeg pipe which is already rate-limited
+        by the GoPro's output cadence.
+        """
         config = make_test_config()
         pipeline = FramePipeline(config)
 
@@ -422,7 +427,7 @@ class TestFPSPacing:
         time.sleep(0.2)
         pipeline.stop()
 
-        assert vcam.sleep_calls >= 5
+        assert vcam.sleep_calls == 0
 
     def test_target_fps_from_config(self):
         """Pipeline target FPS comes from config."""
