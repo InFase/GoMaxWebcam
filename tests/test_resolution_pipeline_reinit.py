@@ -77,7 +77,7 @@ def make_test_config(**overrides) -> Config:
 
 
 def make_test_frame(width=320, height=240, color=(128, 64, 32)):
-    """Create a test RGB24 frame as numpy array."""
+    """Create a test BGR24 frame as numpy array."""
     frame = np.zeros((height, width, 3), dtype=np.uint8)
     frame[:, :] = color
     return frame

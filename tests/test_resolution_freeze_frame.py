@@ -65,7 +65,7 @@ def make_test_config(**overrides) -> Config:
 
 
 def make_test_frame(width=320, height=240, color=(128, 64, 32)):
-    """Create a test RGB24 frame as numpy array."""
+    """Create a test BGR24 frame as numpy array."""
     frame = np.zeros((height, width, 3), dtype=np.uint8)
     frame[:, :] = color
     return frame
@@ -731,6 +731,10 @@ class TestAppControllerChangeResolution:
         config.resolution = 4
         config.fov = 4
         ctrl = AppController(config)
+
+        # Set the GoPro's current resolution to match so change_resolution sees no-op
+        ctrl.gopro.current_resolution = 4
+        ctrl.gopro.current_fov = 4
 
         # Same resolution and fov — should return True without doing anything
         result = ctrl.change_resolution(4, fov=4)

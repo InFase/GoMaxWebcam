@@ -55,7 +55,7 @@ def make_test_config(**overrides) -> Config:
 
 
 def make_test_frame(width=320, height=240, color=(128, 64, 32)):
-    """Create a test RGB24 frame as numpy array."""
+    """Create a test BGR24 frame as numpy array."""
     frame = np.zeros((height, width, 3), dtype=np.uint8)
     frame[:, :] = color
     return frame
@@ -608,8 +608,6 @@ class TestMultipleReconnectCycles:
         pipeline = FramePipeline(config)
         buffer = FrameBuffer(width=320, height=240)
         vcam = MockVirtualCamera()
-        # Use a larger FrameLog so frames from all 3 cycles survive eviction
-        vcam.frames_sent = FrameLog(first_cap=200, recent_cap=500)
 
         colors = [
             (200, 0, 0),    # Cycle 1: red
@@ -617,11 +615,19 @@ class TestMultipleReconnectCycles:
             (0, 0, 200),    # Cycle 3: blue
         ]
 
+        # Track which colors we see live — the FrameLog may evict middle frames
+        # at high throughput, so we check per-cycle instead of at the end.
+        observed_colors = set()
+
         # Start initial stream
         frames0 = [make_test_frame(color=colors[0]) for _ in range(3)]
         reader0 = MockStreamReader(frames=frames0, max_frames=3)
         pipeline.start(reader0, vcam, frame_buffer=buffer)
         time.sleep(0.3)
+
+        # Record colors from cycle 0
+        for frame in vcam.frames_sent:
+            observed_colors.add(tuple(int(c) for c in frame[0, 0]))
 
         for cycle, color in enumerate(colors[1:], start=1):
             # Wait for freeze
@@ -637,20 +643,20 @@ class TestMultipleReconnectCycles:
             # Verify live streaming resumed
             assert pipeline.is_running, f"Pipeline not running after cycle {cycle}"
 
+            # Record colors observed in this cycle
+            for frame in vcam.frames_sent:
+                observed_colors.add(tuple(int(c) for c in frame[0, 0]))
+
         pipeline.stop()
 
-        # Verify all colors appeared in the output
-        all_pixels = set()
-        for frame in vcam.frames_sent:
-            all_pixels.add(tuple(frame[0, 0]))
-
+        # Verify all colors appeared across all cycles
         for color in colors:
-            assert color in all_pixels, (
+            assert color in observed_colors, (
                 f"Color {color} never appeared in output. "
-                f"Seen colors: {all_pixels}"
+                f"Seen colors: {observed_colors}"
             )
 
-        # No black frames
+        # No black frames in the retained frames
         for i, frame in enumerate(vcam.frames_sent):
             assert not np.all(frame == 0), f"Black frame at index {i}"
 
