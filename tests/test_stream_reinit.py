@@ -62,7 +62,7 @@ def make_test_config(**overrides) -> Config:
 
 
 def make_test_frame(width=320, height=240, color=(128, 64, 32)):
-    """Create a test RGB24 frame as numpy array."""
+    """Create a test BGR24 frame as numpy array."""
     frame = np.zeros((height, width, 3), dtype=np.uint8)
     frame[:, :] = color
     return frame
@@ -552,6 +552,154 @@ class TestRecoveryLoopIntegration:
         # Thread should NOT be created since already recovering
         mock_thread.assert_not_called()
 
+    def test_usb_detected_uses_polling_not_blind_sleep(self):
+        """When USB reconnection is event-driven, recovery should poll
+        wait_for_network_interface instead of doing a blind sleep."""
+        ctrl = _make_controller()
+        ctrl._running = True
+
+        # Pre-set the USB reconnect event so the recovery loop sees it immediately
+        ctrl._usb_reconnect_event.set()
+
+        # Mock wait_for_network_interface to return an IP (network ready)
+        ctrl.gopro.wait_for_network_interface = MagicMock(return_value="172.27.187.52")
+
+        # Mock _try_reconnect to succeed
+        with patch.object(ctrl, '_try_reconnect', return_value=True), \
+             patch.object(ctrl, '_start_keepalive'), \
+             patch.object(ctrl, '_fetch_camera_info'):
+            ctrl._is_recovering = True
+            ctrl._recovery_loop()
+
+        # Verify wait_for_network_interface was called with the ncm_adapter_wait timeout
+        ctrl.gopro.wait_for_network_interface.assert_called_once_with(
+            timeout=ctrl.config.ncm_adapter_wait
+        )
+        assert ctrl.state == AppState.STREAMING
+
+    def test_usb_detected_proceeds_even_if_network_poll_times_out(self):
+        """If wait_for_network_interface returns None (timeout), recovery
+        should still attempt _try_reconnect (discovery handles its own polling)."""
+        ctrl = _make_controller()
+        ctrl._running = True
+
+        # Pre-set the USB reconnect event
+        ctrl._usb_reconnect_event.set()
+
+        # Mock wait_for_network_interface to return None (timed out)
+        ctrl.gopro.wait_for_network_interface = MagicMock(return_value=None)
+
+        # Mock _try_reconnect to succeed anyway (discovery has its own retry)
+        with patch.object(ctrl, '_try_reconnect', return_value=True), \
+             patch.object(ctrl, '_start_keepalive'), \
+             patch.object(ctrl, '_fetch_camera_info'):
+            ctrl._is_recovering = True
+            ctrl._recovery_loop()
+
+        # Still called wait_for_network_interface (polling, not blind sleep)
+        ctrl.gopro.wait_for_network_interface.assert_called_once()
+        assert ctrl.state == AppState.STREAMING
+
+    def test_exponential_backoff_doubles_delay_up_to_max(self):
+        """Poll-based reconnects should use exponential backoff: 2s→4s→8s→max 30s.
+
+        When _try_reconnect fails repeatedly, the wait timeout between attempts
+        should double each time, capped at reconnect_max_delay.
+        """
+        ctrl = _make_controller(
+            reconnect_delay=2.0,
+            reconnect_max_delay=30.0,
+            reconnect_max_retries=6,  # Stop after 6 attempts
+        )
+        ctrl._running = True
+        ctrl._is_recovering = True
+
+        # Track the timeout values passed to _usb_reconnect_event.wait()
+        wait_timeouts = []
+        original_wait = ctrl._usb_reconnect_event.wait
+
+        def tracking_wait(timeout=None):
+            wait_timeouts.append(timeout)
+            return False  # Simulate no USB event (poll-based fallback)
+
+        ctrl._usb_reconnect_event.wait = tracking_wait
+
+        # _try_reconnect always fails so we exercise all backoff steps
+        with patch.object(ctrl, '_try_reconnect', return_value=False):
+            ctrl._recovery_loop()
+
+        # Should have reached max retries and entered ERROR state
+        assert ctrl.state == AppState.ERROR
+
+        # Verify exponential backoff sequence: 2, 4, 8, 16, 30, 30
+        # First attempt uses initial delay, then doubles, capped at max
+        assert wait_timeouts == [2.0, 4.0, 8.0, 16.0, 30.0, 30.0]
+
+    def test_exponential_backoff_resets_on_new_recovery(self):
+        """Each new recovery loop should start with the base delay, not the
+        previous backoff value."""
+        ctrl = _make_controller(
+            reconnect_delay=2.0,
+            reconnect_max_delay=30.0,
+        )
+        ctrl._running = True
+
+        wait_timeouts = []
+
+        def tracking_wait(timeout=None):
+            wait_timeouts.append(timeout)
+            return False  # Poll-based fallback
+
+        # Run recovery loop twice — first fails twice then succeeds,
+        # second should start fresh at base delay
+        for run in range(2):
+            ctrl._is_recovering = True
+            wait_timeouts.clear()
+
+            attempt_count = [0]
+            def try_reconnect_side_effect():
+                attempt_count[0] += 1
+                return attempt_count[0] >= 3  # Succeed on 3rd attempt
+
+            ctrl._usb_reconnect_event.wait = tracking_wait
+            attempt_count[0] = 0
+
+            with patch.object(ctrl, '_try_reconnect', side_effect=try_reconnect_side_effect), \
+                 patch.object(ctrl, '_start_keepalive'), \
+                 patch.object(ctrl, '_fetch_camera_info'):
+                ctrl._recovery_loop()
+
+            # Each run: attempts at delay 2.0, then 4.0, then succeeds at 8.0
+            assert wait_timeouts == [2.0, 4.0, 8.0], \
+                f"Run {run+1}: expected [2.0, 4.0, 8.0], got {wait_timeouts}"
+
+    def test_usb_event_driven_reconnect_skips_backoff_wait(self):
+        """When USB reconnect event fires, the wait returns immediately
+        without waiting for the full backoff delay."""
+        ctrl = _make_controller(
+            reconnect_delay=2.0,
+            reconnect_max_delay=30.0,
+        )
+        ctrl._running = True
+        ctrl._is_recovering = True
+
+        # Pre-set USB event so wait returns True immediately
+        ctrl._usb_reconnect_event.set()
+
+        # Mock wait_for_network_interface (required for USB-detected path)
+        ctrl.gopro.wait_for_network_interface = MagicMock(return_value="172.27.187.52")
+
+        start = time.monotonic()
+        with patch.object(ctrl, '_try_reconnect', return_value=True), \
+             patch.object(ctrl, '_start_keepalive'), \
+             patch.object(ctrl, '_fetch_camera_info'):
+            ctrl._recovery_loop()
+        elapsed = time.monotonic() - start
+
+        # Should complete nearly instantly (well under the 2s base delay)
+        assert elapsed < 1.0
+        assert ctrl.state == AppState.STREAMING
+
 
 # ---------------------------------------------------------------------------
 # Tests: Health monitor pause/resume during stream reader swap
@@ -692,3 +840,121 @@ class TestHealthMonitorPauseDuringSwap:
             result = ctrl._create_and_swap_stream_reader()
 
         assert result is True
+
+
+# ---------------------------------------------------------------------------
+# Tests: Infinite retries (never give up)
+# ---------------------------------------------------------------------------
+
+class TestInfiniteRetries:
+    """Tests that the recovery loop never gives up when reconnect_max_retries=0 (default)."""
+
+    def test_infinite_retries_never_enters_error_state(self):
+        """With reconnect_max_retries=0 (default), the recovery loop should keep
+        retrying indefinitely and never enter ERROR state.
+
+        We simulate 20 consecutive failures then a success to prove the loop
+        doesn't cap out at any fixed number of attempts.
+        """
+        ctrl = _make_controller(
+            reconnect_delay=0.01,
+            reconnect_max_delay=0.02,
+            reconnect_max_retries=0,  # 0 = infinite (the default)
+        )
+        ctrl._running = True
+        ctrl._is_recovering = True
+
+        attempt_count = [0]
+        max_failures = 20  # Fail 20 times then succeed
+
+        def try_reconnect_side_effect():
+            attempt_count[0] += 1
+            return attempt_count[0] > max_failures  # Succeed on attempt 21
+
+        with patch.object(ctrl, '_try_reconnect', side_effect=try_reconnect_side_effect), \
+             patch.object(ctrl, '_start_keepalive'), \
+             patch.object(ctrl, '_fetch_camera_info'):
+            ctrl._recovery_loop()
+
+        # Should have succeeded, NOT entered ERROR
+        assert ctrl.state == AppState.STREAMING
+        assert attempt_count[0] == max_failures + 1  # 21 attempts total
+
+    def test_infinite_retries_does_not_emit_max_retries_error(self):
+        """With reconnect_max_retries=0, the 'Could not recover after N attempts'
+        error message should never be emitted, regardless of how many failures occur."""
+        ctrl = _make_controller(
+            reconnect_delay=0.01,
+            reconnect_max_delay=0.02,
+            reconnect_max_retries=0,
+        )
+        ctrl._running = True
+        ctrl._is_recovering = True
+
+        attempt_count = [0]
+
+        def try_reconnect_side_effect():
+            attempt_count[0] += 1
+            return attempt_count[0] >= 15  # Succeed on attempt 15
+
+        status_messages = []
+
+        def capture_status(msg, level="info"):
+            status_messages.append((msg, level))
+
+        ctrl._emit_status = capture_status
+
+        with patch.object(ctrl, '_try_reconnect', side_effect=try_reconnect_side_effect), \
+             patch.object(ctrl, '_start_keepalive'), \
+             patch.object(ctrl, '_fetch_camera_info'):
+            ctrl._recovery_loop()
+
+        # No "Could not recover" error should appear
+        error_msgs = [msg for msg, level in status_messages if "Could not recover" in msg]
+        assert error_msgs == [], f"Unexpected error messages: {error_msgs}"
+        assert attempt_count[0] == 15
+
+    def test_finite_retries_enters_error_after_max(self):
+        """With reconnect_max_retries > 0, the loop should give up after that many attempts."""
+        ctrl = _make_controller(
+            reconnect_delay=0.01,
+            reconnect_max_delay=0.02,
+            reconnect_max_retries=3,
+        )
+        ctrl._running = True
+        ctrl._is_recovering = True
+
+        with patch.object(ctrl, '_try_reconnect', return_value=False):
+            ctrl._recovery_loop()
+
+        assert ctrl.state == AppState.ERROR
+
+    def test_infinite_retries_respects_stop_event(self):
+        """Even with infinite retries, the loop must exit when stop_event is set."""
+        ctrl = _make_controller(
+            reconnect_delay=0.01,
+            reconnect_max_delay=0.02,
+            reconnect_max_retries=0,
+        )
+        ctrl._running = True
+        ctrl._is_recovering = True
+
+        attempt_count = [0]
+
+        def try_reconnect_side_effect():
+            attempt_count[0] += 1
+            if attempt_count[0] >= 5:
+                ctrl._stop_event.set()
+            return False
+
+        with patch.object(ctrl, '_try_reconnect', side_effect=try_reconnect_side_effect):
+            ctrl._recovery_loop()
+
+        # Should have stopped, not entered ERROR
+        assert ctrl.state != AppState.ERROR
+        assert attempt_count[0] >= 5
+
+    def test_default_config_has_infinite_retries(self):
+        """The default config should have reconnect_max_retries=0 (infinite)."""
+        config = Config()
+        assert config.reconnect_max_retries == 0

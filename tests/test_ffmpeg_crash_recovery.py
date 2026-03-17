@@ -71,7 +71,7 @@ def make_test_config(**overrides) -> Config:
 
 
 def make_test_frame(width=320, height=240, color=(128, 64, 32)):
-    """Create a test RGB24 frame as numpy array."""
+    """Create a test BGR24 frame as numpy array."""
     frame = np.zeros((height, width, 3), dtype=np.uint8)
     frame[:, :] = color
     return frame
@@ -891,3 +891,251 @@ class TestStreamReaderStderrBuffer:
         lines = reader.get_stderr_lines()
         assert len(lines) >= 2
         assert any("frame=" in line for line in lines)
+
+    def test_stderr_flushed_to_log_on_crash(self):
+        """When ffmpeg exits with non-zero code, stderr buffer should be flushed to log."""
+        reader = self._make_reader()
+
+        # Pre-populate the buffer with some lines
+        with reader._stderr_lock:
+            reader._stderr_buffer.append("frame=  100 fps=30")
+            reader._stderr_buffer.append("error: connection refused")
+
+        # Mock process that exited with code 1
+        mock_stderr = MagicMock()
+        mock_stderr.read.side_effect = [b""]  # EOF immediately
+        mock_process = MagicMock()
+        mock_process.stderr = mock_stderr
+        mock_process.poll.return_value = 1  # non-zero exit
+        reader._process = mock_process
+
+        with patch("stream_reader.log") as mock_log:
+            reader._read_stderr()
+
+        # Should have logged the crash header and each stderr line
+        # Use call args to check: format string contains EVENT:ffmpeg_crash
+        warning_args = [c[0] for c in mock_log.warning.call_args_list]  # positional args
+        warning_fmts = [args[0] for args in warning_args]
+        assert any("ffmpeg_crash" in fmt for fmt in warning_fmts)
+        assert any("connection refused" in str(args) for args in warning_args)
+        assert any("end of stderr dump" in fmt for fmt in warning_fmts)
+
+    def test_stderr_not_flushed_on_clean_exit(self):
+        """When ffmpeg exits with code 0, stderr buffer should NOT be flushed."""
+        reader = self._make_reader()
+
+        with reader._stderr_lock:
+            reader._stderr_buffer.append("normal output line")
+
+        mock_stderr = MagicMock()
+        mock_stderr.read.side_effect = [b""]
+        mock_process = MagicMock()
+        mock_process.stderr = mock_stderr
+        mock_process.poll.return_value = 0  # clean exit
+        reader._process = mock_process
+
+        with patch("stream_reader.log") as mock_log:
+            reader._read_stderr()
+
+        # Should NOT have logged any ffmpeg_crash messages
+        warning_fmts = [c[0][0] for c in mock_log.warning.call_args_list]
+        assert not any("ffmpeg_crash" in fmt for fmt in warning_fmts)
+
+    def test_stderr_flush_with_empty_buffer(self):
+        """Crash with empty stderr buffer should log a 'no output' message."""
+        reader = self._make_reader()
+
+        mock_stderr = MagicMock()
+        mock_stderr.read.side_effect = [b""]
+        mock_process = MagicMock()
+        mock_process.stderr = mock_stderr
+        mock_process.poll.return_value = -9  # killed
+        reader._process = mock_process
+
+        with patch("stream_reader.log") as mock_log:
+            reader._read_stderr()
+
+        warning_fmts = [c[0][0] for c in mock_log.warning.call_args_list]
+        assert any("no stderr output captured" in fmt for fmt in warning_fmts)
+
+    def test_flush_stderr_to_log_method_directly(self):
+        """_flush_stderr_to_log should dump all buffer lines at WARNING level."""
+        reader = self._make_reader()
+
+        with reader._stderr_lock:
+            reader._stderr_buffer.append("line alpha")
+            reader._stderr_buffer.append("line beta")
+            reader._stderr_buffer.append("fatal: something broke")
+
+        with patch("stream_reader.log") as mock_log:
+            reader._flush_stderr_to_log(exit_code=2)
+
+        # Header + 3 lines + footer = 5 warning calls
+        assert mock_log.warning.call_count == 5
+        # Check content via the full call args strings
+        all_args_str = [str(c) for c in mock_log.warning.call_args_list]
+        assert any("line alpha" in s for s in all_args_str)
+        assert any("line beta" in s for s in all_args_str)
+        assert any("fatal: something broke" in s for s in all_args_str)
+
+    def test_stderr_flushed_with_real_stderr_data_on_crash(self):
+        """Full integration: stderr data arriving then crash should flush all to log."""
+        reader = self._make_reader()
+
+        mock_stderr = MagicMock()
+        mock_stderr.read.side_effect = [
+            b"Opening input...\r\nStream mapping:\r\n",
+            b"error: broken pipe\r\n",
+            b"",  # EOF
+        ]
+        mock_process = MagicMock()
+        mock_process.stderr = mock_stderr
+        mock_process.poll.return_value = 1
+        reader._process = mock_process
+
+        with patch("stream_reader.log") as mock_log:
+            reader._read_stderr()
+
+        # Buffer should have the lines and they should be flushed
+        lines = reader.get_stderr_lines()
+        assert "Opening input..." in lines
+        assert "error: broken pipe" in lines
+
+        warning_fmts = [c[0][0] for c in mock_log.warning.call_args_list]
+        assert any("ffmpeg_crash" in fmt for fmt in warning_fmts)
+        all_args_str = [str(c) for c in mock_log.warning.call_args_list]
+        assert any("broken pipe" in s for s in all_args_str)
+
+
+# ---------------------------------------------------------------------------
+# AC 2: Continuous stderr logging when ffmpeg_debug is True
+# ---------------------------------------------------------------------------
+
+class TestFfmpegDebugStderrLogging:
+    """Tests for continuous stderr logging activated by ffmpeg_debug config."""
+
+    def _make_reader(self, ffmpeg_debug=False):
+        config = make_test_config()
+        config.ffmpeg_debug = ffmpeg_debug
+        return StreamReader(config)
+
+    def test_debug_off_does_not_log_normal_lines(self):
+        """With ffmpeg_debug=False, normal (non-error) stderr lines are NOT logged."""
+        reader = self._make_reader(ffmpeg_debug=False)
+
+        mock_stderr = MagicMock()
+        mock_stderr.read.side_effect = [
+            b"frame=  100 fps=30\r\nStream mapping:\r\n",
+            b"",
+        ]
+        mock_process = MagicMock()
+        mock_process.stderr = mock_stderr
+        mock_process.poll.return_value = 0
+        reader._process = mock_process
+
+        with patch("stream_reader.log") as mock_log:
+            reader._read_stderr()
+
+        # Normal lines should NOT be logged at debug level
+        debug_args = [str(c) for c in mock_log.debug.call_args_list]
+        assert not any("[ffmpeg stderr]" in s for s in debug_args)
+
+    def test_debug_on_logs_all_normal_lines(self):
+        """With ffmpeg_debug=True, ALL non-error stderr lines are logged at DEBUG level."""
+        reader = self._make_reader(ffmpeg_debug=True)
+
+        mock_stderr = MagicMock()
+        mock_stderr.read.side_effect = [
+            b"frame=  100 fps=30\r\nStream mapping:\r\nOutput #0:\r\n",
+            b"",
+        ]
+        mock_process = MagicMock()
+        mock_process.stderr = mock_stderr
+        mock_process.poll.return_value = 0
+        reader._process = mock_process
+
+        with patch("stream_reader.log") as mock_log:
+            reader._read_stderr()
+
+        debug_args = [str(c) for c in mock_log.debug.call_args_list]
+        ffmpeg_debug_lines = [s for s in debug_args if "[ffmpeg stderr]" in s]
+        assert len(ffmpeg_debug_lines) == 3  # all 3 normal lines
+
+    def test_debug_on_errors_still_logged_at_warning(self):
+        """With ffmpeg_debug=True, error lines are still logged at WARNING (not just debug)."""
+        reader = self._make_reader(ffmpeg_debug=True)
+
+        mock_stderr = MagicMock()
+        mock_stderr.read.side_effect = [
+            b"normal output\r\nfatal: crash\r\n",
+            b"",
+        ]
+        mock_process = MagicMock()
+        mock_process.stderr = mock_stderr
+        mock_process.poll.return_value = 0
+        reader._process = mock_process
+
+        with patch("stream_reader.log") as mock_log:
+            reader._read_stderr()
+
+        # "fatal: crash" should be at WARNING level
+        warning_args = [str(c) for c in mock_log.warning.call_args_list]
+        assert any("fatal: crash" in s for s in warning_args)
+
+        # "normal output" should be at DEBUG level (not warning)
+        debug_args = [str(c) for c in mock_log.debug.call_args_list]
+        assert any("normal output" in s for s in debug_args)
+
+    def test_debug_on_error_lines_not_double_logged(self):
+        """With ffmpeg_debug=True, error lines should NOT appear as both debug and warning."""
+        reader = self._make_reader(ffmpeg_debug=True)
+
+        mock_stderr = MagicMock()
+        mock_stderr.read.side_effect = [
+            b"error: bad input\r\n",
+            b"",
+        ]
+        mock_process = MagicMock()
+        mock_process.stderr = mock_stderr
+        mock_process.poll.return_value = 0
+        reader._process = mock_process
+
+        with patch("stream_reader.log") as mock_log:
+            reader._read_stderr()
+
+        # Error line at WARNING
+        warning_args = [str(c) for c in mock_log.warning.call_args_list]
+        assert any("bad input" in s for s in warning_args)
+
+        # Error line should NOT also appear at DEBUG with [ffmpeg stderr] prefix
+        debug_args = [str(c) for c in mock_log.debug.call_args_list]
+        debug_stderr_lines = [s for s in debug_args if "[ffmpeg stderr]" in s]
+        assert not any("bad input" in s for s in debug_stderr_lines)
+
+    def test_build_ffmpeg_command_includes_loglevel_debug(self):
+        """When ffmpeg_debug=True, the ffmpeg command should include -loglevel debug."""
+        reader = self._make_reader(ffmpeg_debug=True)
+        cmd = reader._build_ffmpeg_command()
+        assert "-loglevel" in cmd
+        idx = cmd.index("-loglevel")
+        assert cmd[idx + 1] == "debug"
+
+    def test_build_ffmpeg_command_no_loglevel_when_disabled(self):
+        """When ffmpeg_debug=False, the ffmpeg command should NOT include -loglevel."""
+        reader = self._make_reader(ffmpeg_debug=False)
+        cmd = reader._build_ffmpeg_command()
+        assert "-loglevel" not in cmd
+
+    def test_config_ffmpeg_debug_default_is_false(self):
+        """Config.ffmpeg_debug should default to False."""
+        config = Config()
+        assert config.ffmpeg_debug is False
+
+    def test_reader_without_ffmpeg_debug_attr_defaults_false(self):
+        """StreamReader handles config objects missing ffmpeg_debug (uses getattr default)."""
+        config = make_test_config()
+        # Remove the attribute to simulate older config
+        if hasattr(config, "ffmpeg_debug"):
+            delattr(config, "ffmpeg_debug")
+        reader = StreamReader(config)
+        assert reader._ffmpeg_debug is False

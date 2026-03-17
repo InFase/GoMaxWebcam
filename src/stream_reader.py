@@ -59,6 +59,7 @@ class StreamReader:
         self.fps: int = config.stream_fps
         self.udp_port: int = config.udp_port
         self.ffmpeg_path: str = config.ffmpeg_path
+        self._ffmpeg_debug: bool = getattr(config, "ffmpeg_debug", False)
 
         self._process: Optional[subprocess.Popen] = None
         self._frame_size: int = self.width * self.height * 3  # BGR24
@@ -166,8 +167,13 @@ class StreamReader:
           -pix_fmt bgr24: Unity Capture accepts BGR natively, avoids channel swap
           buffer_size=65536: small UDP socket buffer to prevent stale frames
         """
-        return [
-            self.ffmpeg_path,
+        cmd = [self.ffmpeg_path]
+        # When ffmpeg_debug is enabled in config.json, use verbose loglevel
+        # so all ffmpeg diagnostics are captured in stderr and logged.
+        # See config.py ffmpeg_debug field for details.
+        if self._ffmpeg_debug:
+            cmd += ["-loglevel", "debug"]
+        cmd += [
             # Low-latency options
             "-fflags", "nobuffer",
             "-flags", "low_delay",
@@ -186,6 +192,7 @@ class StreamReader:
             "-sn",
             "pipe:1",
         ]
+        return cmd
 
     def read_frame(self) -> Optional[np.ndarray]:
         """Read exactly one raw BGR24 frame from ffmpeg stdout.
@@ -296,10 +303,49 @@ class StreamReader:
                         with self._stderr_lock:
                             self._last_stderr = segment
                             self._stderr_buffer.append(segment)
-                        if any(kw in segment.lower() for kw in ("error", "fatal", "invalid")):
+                        is_error = any(kw in segment.lower() for kw in ("error", "fatal", "invalid"))
+                        if is_error:
                             log.warning("[EVENT:ffmpeg_error] ffmpeg: %s", segment)
+                        if self._ffmpeg_debug and not is_error:
+                            log.debug("[ffmpeg stderr] %s", segment)
         except (ValueError, OSError):
             pass  # Pipe closed
+
+        # If ffmpeg exited with a non-zero code, flush the ring buffer to log
+        # so crash diagnostics are preserved in the log file.
+        exit_code = self._process.poll() if self._process else None
+        if exit_code is not None and exit_code != 0:
+            self._flush_stderr_to_log(exit_code)
+
+    def _flush_stderr_to_log(self, exit_code: int):
+        """Flush the stderr ring buffer contents to the log file.
+
+        Called when ffmpeg exits with a non-zero code to preserve crash
+        diagnostics. Each buffered line is logged at WARNING level, bracketed
+        by header/footer markers for easy log searching.
+
+        Args:
+            exit_code: The ffmpeg process exit code.
+        """
+        with self._stderr_lock:
+            lines = list(self._stderr_buffer)
+
+        if not lines:
+            log.warning(
+                "[EVENT:ffmpeg_crash] ffmpeg exited with code %d "
+                "(no stderr output captured)",
+                exit_code,
+            )
+            return
+
+        log.warning(
+            "[EVENT:ffmpeg_crash] ffmpeg exited with code %d — "
+            "dumping %d stderr lines:",
+            exit_code, len(lines),
+        )
+        for line in lines:
+            log.warning("[ffmpeg stderr] %s", line)
+        log.warning("[EVENT:ffmpeg_crash] — end of stderr dump —")
 
     @property
     def last_error(self) -> str:
