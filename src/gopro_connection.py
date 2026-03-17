@@ -652,7 +652,7 @@ class GoProConnection:
             log.debug("Disable USB control returned error %d", error_code)
         return error_code == 0
 
-    def _wait_for_network_interface(self, timeout: float = 15.0) -> Optional[str]:
+    def wait_for_network_interface(self, timeout: float = 15.0) -> Optional[str]:
         """Wait for the GoPro NCM network interface to come up.
 
         After USB detection, the virtual network adapter may take

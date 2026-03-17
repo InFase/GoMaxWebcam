@@ -673,6 +673,8 @@ class TestStartupValidation:
         assert config.discovery_max_retries > 0
         assert config.keepalive_interval > 0
         assert config.reconnect_delay > 0
+        assert config.reconnect_max_delay >= config.reconnect_delay
+        assert config.stale_poll_interval > 0
         assert config.ncm_adapter_wait > 0
 
     def test_stop_then_start_is_clean(self):

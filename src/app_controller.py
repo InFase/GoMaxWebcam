@@ -106,6 +106,7 @@ class AppController:
         self.on_status: Optional[Callable[[str, str], None]] = None
         self.on_camera_info: Optional[Callable[[dict], None]] = None
         self.on_webcam_mode_failed: Optional[Callable[[str], None]] = None
+        self.on_active_port: Optional[Callable[[int], None]] = None
 
         # Thread management
         self._running = False
@@ -131,10 +132,10 @@ class AppController:
         # when the event-driven USBEventListener misses events or fails to start
         self._usb_poller = None
 
-        # Staleness monitor — polls FrameBuffer.is_stale every 500ms
+        # Staleness monitor — polls FrameBuffer.is_stale at config.stale_poll_interval
         # to detect stream freezes independently of USB events and ffmpeg health
         self._staleness_thread: Optional[threading.Thread] = None
-        self._staleness_interval: float = 0.5  # Poll every 500ms
+        self._staleness_interval: float = self.config.stale_poll_interval
         self._staleness_was_stale: bool = False  # Edge detection: only trigger once per stale transition
 
         # Recovery state tracking
@@ -315,6 +316,14 @@ class AppController:
             except Exception as e:
                 log.error("Status callback error: %s", e)
 
+    def _emit_active_port(self, port: int):
+        """Notify the GUI of the active UDP port (may differ from config after auto-selection)."""
+        if self.on_active_port:
+            try:
+                self.on_active_port(port)
+            except Exception as e:
+                log.error("Active port callback error: %s", e)
+
     def _handle_gopro_status(self, message: str, level: str):
         """Forward GoProConnection status updates through our unified handler."""
         self._emit_status(message, level)
@@ -322,11 +331,15 @@ class AppController:
     # ── USB Event Listener ─────────────────────────────────────────
 
     def _start_usb_listener(self):
-        """Start the USB event listener for fast reconnection detection.
+        """Start the single USB event listener that fans out to all consumers.
 
-        When the GoPro is unplugged and replugged, the USB event listener
-        fires immediately — much faster than polling-based discovery.
-        This allows recovery to start within seconds of reconnection.
+        Creates ONE USBEventListener instance whose attach/detach callbacks
+        fan out to both:
+          - AppController: sets _usb_reconnect_event for fast recovery
+          - DisconnectDetector: triggers proactive freeze-frame on detach
+
+        This avoids creating multiple Windows message-only windows and
+        duplicate device notification registrations.
         """
         try:
             from usb_event_listener import USBEventListener
@@ -342,14 +355,26 @@ class AppController:
                 "[EVENT:usb_listener] GoPro USB device attached: %s",
                 device_id[:80],
             )
-            # Signal the recovery loop that USB reconnection was detected
+            # Fan out to AppController: signal recovery loop
             self._usb_reconnect_event.set()
+            # Fan out to DisconnectDetector: notify of reconnection
+            if self._disconnect_detector is not None:
+                try:
+                    self._disconnect_detector.handle_usb_attach(device_id)
+                except Exception:
+                    log.exception("[EVENT:usb_listener] Error forwarding attach to disconnect detector")
 
         def on_gopro_detached(device_id: str):
             log.info(
                 "[EVENT:usb_listener] GoPro USB device detached: %s",
                 device_id[:80],
             )
+            # Fan out to DisconnectDetector: trigger proactive freeze-frame
+            if self._disconnect_detector is not None:
+                try:
+                    self._disconnect_detector.handle_usb_detach(device_id)
+                except Exception:
+                    log.exception("[EVENT:usb_listener] Error forwarding detach to disconnect detector")
 
         self._usb_listener = USBEventListener(
             on_attach=on_gopro_attached,
@@ -357,7 +382,7 @@ class AppController:
         )
         try:
             if self._usb_listener.start(timeout=3.0):
-                log.info("[EVENT:usb_listener] USB event listener started for fast reconnect detection")
+                log.info("[EVENT:usb_listener] USB event listener started (fans out to controller + detector)")
             else:
                 log.debug("[EVENT:usb_listener] USB event listener failed to start (will use polling)")
                 self._usb_listener = None
@@ -455,6 +480,10 @@ class AppController:
 
         This ensures the virtual camera captures the last good frame BEFORE
         ffmpeg starts producing corrupted frames from its dying buffers.
+
+        NOTE: When AppController's USB listener is active, the detector receives
+        USB events via handle_usb_attach()/handle_usb_detach() from the shared
+        listener — it does NOT create its own USBEventListener instance.
         """
         from disconnect_detector import DisconnectDetector
 
@@ -467,6 +496,7 @@ class AppController:
             connection=self.gopro,
             stream_reader=self._stream_reader,
             config=self.config,
+            usb_listener=self._usb_listener,  # Share the single listener
         )
 
         # Wire callbacks: USB detach triggers recovery, USB attach speeds it up,
@@ -499,7 +529,7 @@ class AppController:
         """Called by DisconnectDetector when USB disconnect is detected.
 
         This fires INSTANTLY when the USB cable is yanked — much faster than
-        the keep-alive polling loop (which takes 3 × 8s = 24s to detect).
+        the keep-alive polling loop (which takes 3 × 2.5s = 7.5s to detect).
 
         The disconnect detector has already triggered freeze-frame on the
         pipeline. Here we:
@@ -736,7 +766,11 @@ class AppController:
                 )
 
                 # Trigger recovery if not already in progress
-                if not self._is_recovering:
+                # Use _recovery_lock to safely check _is_recovering and
+                # prevent duplicate recovery triggers from concurrent threads
+                with self._recovery_lock:
+                    already_recovering = self._is_recovering
+                if not already_recovering:
                     self._auto_recover()
 
             elif not is_stale and self._staleness_was_stale:
@@ -797,10 +831,15 @@ class AppController:
             self._set_state(AppState.STREAMING)
             self._start_keepalive()
 
-            # Step 6: Start disconnect detector (bridges USB detach → freeze-frame)
+            # Step 6: Start USB listener + disconnect detector
+            # The single USB listener fans out to both AppController (reconnect)
+            # and DisconnectDetector (freeze-frame). Must start listener FIRST
+            # so the detector can receive forwarded events instead of creating
+            # its own duplicate listener.
             # NOTE: USB device poller is NOT started here — it spawns PowerShell
             # every 2 seconds which causes I/O stalls that kill ffmpeg's stdout pipe.
             # The poller is only started during recovery (RECONNECTING state).
+            self._start_usb_listener()
             self._start_disconnect_detector()
 
             # Step 7: Start staleness monitor (polls FrameBuffer.is_stale every 500ms)
@@ -902,11 +941,16 @@ class AppController:
                 f"Port {preferred_port} busy — auto-selected port {selected_port}",
                 "warning",
             )
-            # Update runtime config without persisting to disk
+            # Update runtime config for this session only — save the user's
+            # preferred port so config.save() never persists the auto-selected one.
+            self.config._preferred_udp_port = preferred_port
             self.config.udp_port = selected_port
         else:
             log.info("[EVENT:startup] UDP port %d is available", selected_port)
             self._emit_status(f"UDP port {selected_port} is available", "success")
+
+        # Notify GUI of the active port (may differ from config spinner value)
+        self._emit_active_port(selected_port)
 
         return True
 
@@ -1428,12 +1472,15 @@ class AppController:
         The virtual camera NEVER stops during this entire process.
         """
         reconnect_delay = self.config.reconnect_delay
+        reconnect_max_delay = self.config.reconnect_max_delay
         max_retries = self.config.reconnect_max_retries  # 0 = infinite
+        current_delay = reconnect_delay  # Grows with exponential backoff up to reconnect_max_delay
 
         log.info(
             "[EVENT:reconnect_attempt] Recovery loop started "
-            "(delay=%.1fs, max_retries=%s)",
-            reconnect_delay, max_retries if max_retries > 0 else "infinite",
+            "(delay=%.1fs, max_delay=%.1fs, max_retries=%s)",
+            reconnect_delay, reconnect_max_delay,
+            max_retries if max_retries > 0 else "infinite",
         )
 
         attempt = 0
@@ -1462,7 +1509,7 @@ class AppController:
 
                 # Use the USB reconnect event with a timeout for poll-based fallback
                 # If USB listener detected reconnection, the event is already set
-                usb_detected = self._usb_reconnect_event.wait(timeout=reconnect_delay)
+                usb_detected = self._usb_reconnect_event.wait(timeout=current_delay)
 
                 if self._stop_event.is_set():
                     return
@@ -1472,16 +1519,23 @@ class AppController:
                     ncm_wait = self.config.ncm_adapter_wait
                     log.info(
                         "[EVENT:reconnect_attempt] USB reconnection detected (event-driven) "
-                        "— waiting %.1fs for NCM network adapter...",
+                        "— polling for NCM network adapter (timeout=%.1fs)...",
                         ncm_wait,
                     )
                     self._emit_status(
                         "USB reconnection detected! Waiting for network...",
                         "info"
                     )
-                    # Give the NCM network adapter time to initialize
-                    if self._stop_event.wait(timeout=ncm_wait):
+                    # Poll for the NCM network adapter instead of blind sleep —
+                    # returns as soon as the interface is up, or None on timeout
+                    ncm_ip = self.gopro.wait_for_network_interface(timeout=ncm_wait)
+                    if self._stop_event.is_set():
                         return
+                    if ncm_ip:
+                        log.info(
+                            "[EVENT:reconnect_attempt] NCM adapter ready at %s",
+                            ncm_ip,
+                        )
                 else:
                     log.debug(
                         "[EVENT:reconnect_attempt] No USB event — trying poll-based rediscovery "
@@ -1512,16 +1566,18 @@ class AppController:
                     self._fetch_camera_info()
                     return
 
-                # Recovery attempt failed — wait before next attempt
+                # Recovery attempt failed — apply exponential backoff up to reconnect_max_delay
                 log.info(
                     "[EVENT:reconnect_attempt] Recovery attempt %d failed, "
                     "retrying in %.1fs...",
-                    attempt, reconnect_delay,
+                    attempt, current_delay,
                 )
                 self._emit_status(
                     f"Reconnection attempt {attempt} failed, retrying...",
                     "warning"
                 )
+                # Exponential backoff: double the delay, capped at reconnect_max_delay
+                current_delay = min(current_delay * 2, reconnect_max_delay)
 
         except Exception as e:
             log.exception("[EVENT:recovery_failed] Recovery loop crashed: %s", e)

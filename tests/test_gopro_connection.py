@@ -42,6 +42,7 @@ class MockConfig:
     """Minimal config for testing."""
     resolution: int = 4
     fov: int = 4
+    udp_port: int = 8554
     discovery_timeout: float = 1.0
     discovery_overall_timeout: float = 5.0
     idle_reset_delay: float = 0.01  # Fast for tests
