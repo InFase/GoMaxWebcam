@@ -797,6 +797,16 @@ class VirtualCamera:
                 "device='%s', backend=%s, actual_device='%s'",
                 self.device_name, backend, cam.device,
             )
+
+            # Warn if the actual device name doesn't match the requested name
+            if cam.device and self.device_name and \
+               cam.device.lower() != self.device_name.lower():
+                log.warning(
+                    "[EVENT:vcam_start] Device name mismatch: "
+                    "requested='%s', actual='%s'",
+                    self.device_name, cam.device,
+                )
+
             return True
 
         except RuntimeError as e:
@@ -861,6 +871,9 @@ class VirtualCamera:
             with self._lock:
                 if self._cam is None or not self._running:
                     return False
+                h, w = frame.shape[:2]
+                if h != self.height or w != self.width:
+                    frame = self._resize_frame(frame)
                 self._cam.send(frame)
                 self._last_frame = frame
                 self._frame_count += 1

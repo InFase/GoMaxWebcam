@@ -435,27 +435,28 @@ class TestChangeResolutionFlow:
         return controller
 
     def test_stops_pipeline(self):
-        """_change_resolution_flow stops the existing pipeline."""
+        """change_resolution enters freeze-frame on the existing pipeline."""
         controller = self._make_controller()
         mock_pipeline = MagicMock()
+        mock_pipeline.is_running = True
         controller._frame_pipeline = mock_pipeline
         controller._stream_reader = MagicMock()
         controller._virtual_camera = MockVirtualCamera()
         controller._virtual_camera.start()
         controller._frame_buffer = MagicMock()
-        controller.gopro._connected = False
+        # Set gopro state so change_resolution doesn't no-op
+        controller.gopro._current_resolution = 4
+        controller.gopro._current_fov = 4
 
         with patch.object(controller, '_apply_resolution_on_camera', return_value=True), \
-             patch.object(controller, '_create_and_swap_stream_reader', return_value=True), \
-             patch.object(controller, '_stop_disconnect_detector'), \
-             patch.object(controller, '_start_disconnect_detector'), \
+             patch.object(controller, '_resume_stream_after_resolution_change', return_value=True), \
              _usb_listener_patch:
             controller.change_resolution(7)  # 720p
 
-        mock_pipeline.stop.assert_called_once()
+        mock_pipeline.enter_freeze_frame.assert_called_once()
 
     def test_stops_stream_reader(self):
-        """_change_resolution_flow stops the old stream reader."""
+        """change_resolution stops the old stream reader."""
         controller = self._make_controller()
         mock_reader = MagicMock()
         controller._stream_reader = mock_reader
@@ -464,19 +465,19 @@ class TestChangeResolutionFlow:
         controller._virtual_camera.start()
         controller._frame_buffer = FrameBuffer(width=320, height=240)
         controller._frame_buffer.start()
-        controller.gopro._connected = False
+        # Set gopro state so change_resolution doesn't no-op
+        controller.gopro._current_resolution = 4
+        controller.gopro._current_fov = 4
 
         with patch.object(controller, '_apply_resolution_on_camera', return_value=True), \
-             patch.object(controller, '_create_and_swap_stream_reader', return_value=True), \
-             patch.object(controller, '_stop_disconnect_detector'), \
-             patch.object(controller, '_start_disconnect_detector'), \
+             patch.object(controller, '_resume_stream_after_resolution_change', return_value=True), \
              _usb_listener_patch:
             controller.change_resolution(7)  # 720p
 
         mock_reader.stop.assert_called_once()
 
     def test_reconfigures_vcam(self):
-        """change_resolution reconfigures virtual camera."""
+        """change_resolution delegates to _resume_stream_after_resolution_change with correct dims."""
         controller = self._make_controller()
         vcam = MockVirtualCamera(width=320, height=240)
         vcam.start()
@@ -485,20 +486,19 @@ class TestChangeResolutionFlow:
         controller._stream_reader = None
         controller._frame_buffer = FrameBuffer(width=320, height=240)
         controller._frame_buffer.start()
-        controller.gopro._connected = False
+        # Set gopro state so change_resolution doesn't no-op
+        controller.gopro._current_resolution = 4
+        controller.gopro._current_fov = 4
 
         with patch.object(controller, '_apply_resolution_on_camera', return_value=True), \
-             patch.object(controller, '_create_and_swap_stream_reader', return_value=True), \
-             patch.object(controller, '_stop_disconnect_detector'), \
-             patch.object(controller, '_start_disconnect_detector'), \
+             patch.object(controller, '_resume_stream_after_resolution_change', return_value=True) as mock_resume, \
              _usb_listener_patch:
             controller.change_resolution(7)  # 720p
 
-        assert vcam.width == 1280
-        assert vcam.height == 720
+        mock_resume.assert_called_once_with(1280, 720, 7, 4)
 
     def test_resizes_frame_buffer(self):
-        """change_resolution resizes the frame buffer."""
+        """_resume_stream_after_resolution_change resizes the frame buffer."""
         controller = self._make_controller()
         controller._virtual_camera = MockVirtualCamera()
         controller._virtual_camera.start()
@@ -507,20 +507,21 @@ class TestChangeResolutionFlow:
         buffer = FrameBuffer(width=320, height=240)
         buffer.start()
         controller._frame_buffer = buffer
-        controller.gopro._connected = False
 
-        with patch.object(controller, '_apply_resolution_on_camera', return_value=True), \
-             patch.object(controller, '_create_and_swap_stream_reader', return_value=True), \
+        with patch('stream_reader.StreamReader') as MockSR, \
+             patch('frame_pipeline.FramePipeline') as MockFP, \
              patch.object(controller, '_stop_disconnect_detector'), \
              patch.object(controller, '_start_disconnect_detector'), \
              _usb_listener_patch:
-            controller.change_resolution(7)  # 720p
+            MockSR.return_value.start.return_value = True
+            MockFP.return_value.start.return_value = True
+            controller._resume_stream_after_resolution_change(1280, 720, 7, 4)
 
         assert buffer.width == 1280
         assert buffer.height == 720
 
     def test_updates_config(self):
-        """change_resolution updates config dimensions."""
+        """_resume_stream_after_resolution_change updates config dimensions."""
         controller = self._make_controller()
         controller._virtual_camera = MockVirtualCamera()
         controller._virtual_camera.start()
@@ -528,14 +529,15 @@ class TestChangeResolutionFlow:
         controller._stream_reader = None
         controller._frame_buffer = FrameBuffer(width=320, height=240)
         controller._frame_buffer.start()
-        controller.gopro._connected = False
 
-        with patch.object(controller, '_apply_resolution_on_camera', return_value=True), \
-             patch.object(controller, '_create_and_swap_stream_reader', return_value=True), \
+        with patch('stream_reader.StreamReader') as MockSR, \
+             patch('frame_pipeline.FramePipeline') as MockFP, \
              patch.object(controller, '_stop_disconnect_detector'), \
              patch.object(controller, '_start_disconnect_detector'), \
              _usb_listener_patch:
-            controller.change_resolution(4, fov=2)  # 1080p
+            MockSR.return_value.start.return_value = True
+            MockFP.return_value.start.return_value = True
+            controller._resume_stream_after_resolution_change(1920, 1080, 4, 2)
 
         assert controller.config.stream_width == 1920
         assert controller.config.stream_height == 1080
@@ -553,6 +555,9 @@ class TestChangeResolutionFlow:
         controller._stream_reader = None
         controller._frame_buffer = FrameBuffer(width=320, height=240)
         controller._frame_buffer.start()
+        # Set gopro state so change_resolution doesn't no-op
+        controller.gopro._current_resolution = 4
+        controller.gopro._current_fov = 4
 
         # First apply fails, fallback succeeds
         with patch.object(controller, '_apply_resolution_on_camera',
@@ -566,7 +571,7 @@ class TestChangeResolutionFlow:
         assert mock_apply.call_count == 2
 
     def test_restarts_gopro_webcam(self):
-        """change_resolution restarts GoPro webcam at new resolution."""
+        """_apply_resolution_on_camera calls stop_webcam then start_webcam."""
         controller = self._make_controller()
         controller._virtual_camera = MockVirtualCamera()
         controller._virtual_camera.start()
@@ -575,14 +580,15 @@ class TestChangeResolutionFlow:
         controller._stream_reader = MagicMock()
         controller._frame_buffer = FrameBuffer(width=320, height=240)
         controller._frame_buffer.start()
+        # Set gopro state so change_resolution doesn't no-op
+        controller.gopro._current_resolution = 7
+        controller.gopro._current_fov = 4
 
         with patch.object(type(controller.gopro), 'is_connected',
                           new_callable=PropertyMock, return_value=True), \
              patch.object(controller.gopro, 'stop_webcam') as mock_stop_wc, \
              patch.object(controller.gopro, 'start_webcam', return_value=True) as mock_start_wc, \
-             patch.object(controller, '_create_and_swap_stream_reader', return_value=True), \
-             patch.object(controller, '_stop_disconnect_detector'), \
-             patch.object(controller, '_start_disconnect_detector'), \
+             patch.object(controller, '_resume_stream_after_resolution_change', return_value=True), \
              _usb_listener_patch:
             controller.change_resolution(4, fov=2)  # 1080p
 

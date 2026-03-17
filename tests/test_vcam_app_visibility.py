@@ -652,19 +652,19 @@ class TestZoomTeamsCompatibility:
     @patch("pyvirtualcam.Camera")
     @patch("pyvirtualcam.PixelFormat")
     def test_vcam_sends_rgb_format(self, mock_fmt, mock_cam_cls, mock_backend):
-        """Virtual camera should output RGB format (pyvirtualcam.PixelFormat.RGB).
+        """Virtual camera should output BGR format (pyvirtualcam.PixelFormat.BGR).
 
-        Both Zoom and Teams expect standard color format from webcams.
+        Unity Capture accepts BGR natively, matching ffmpeg's bgr24 output.
         """
         mock_cam = make_mock_camera()
         mock_cam_cls.return_value = mock_cam
-        mock_fmt.RGB = "RGB"
+        mock_fmt.BGR = "BGR"
 
         vcam = VirtualCamera(make_test_config())
         vcam.start()
 
         call_kwargs = mock_cam_cls.call_args[1]
-        assert call_kwargs["fmt"] == "RGB"
+        assert call_kwargs["fmt"] == "BGR"
 
         vcam.stop()
 

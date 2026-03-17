@@ -413,6 +413,9 @@ class TestAppControllerChangeResolution(unittest.TestCase):
 
         controller.config.resolution = 4
         controller.config.fov = 4
+        # Set gopro state so change_resolution doesn't no-op and can format log messages
+        controller.gopro._current_resolution = 4
+        controller.gopro._current_fov = 4
 
         controller.change_resolution(12)
 
@@ -424,6 +427,9 @@ class TestAppControllerChangeResolution(unittest.TestCase):
         controller = self._make_controller()
         controller.config.resolution = 4
         controller.config.fov = 4
+        # Set gopro state so change_resolution knows the current resolution
+        controller.gopro._current_resolution = 4
+        controller.gopro._current_fov = 4
 
         # First call (new res) fails, fallback (old res) succeeds
         controller._apply_resolution_on_camera = MagicMock(
@@ -442,10 +448,13 @@ class TestAppControllerChangeResolution(unittest.TestCase):
 
     @patch("usb_event_listener.USBEventListener")
     def test_noop_when_same_resolution(self, mock_usb):
-        """No-op when resolution and FOV match current config."""
+        """No-op when resolution and FOV match current gopro state."""
         controller = self._make_controller()
         controller.config.resolution = 4
         controller.config.fov = 4
+        # Set gopro state to match — change_resolution uses gopro.current_resolution
+        controller.gopro._current_resolution = 4
+        controller.gopro._current_fov = 4
 
         result = controller.change_resolution(4)
         self.assertTrue(result)
