@@ -371,6 +371,60 @@ class TestFindAvailablePortEdgeCases(unittest.TestCase):
         finally:
             sock.close()
 
+    def test_config_save_preserves_preferred_port_not_auto_selected(self):
+        """config.save() should write the original preferred port, not the auto-selected one."""
+        import json
+        import tempfile
+        from config import Config
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            tmp_path = f.name
+
+        try:
+            config = Config()
+            config._config_path = tmp_path
+            preferred = 8554
+            auto_selected = 8556
+
+            # Simulate what app_controller does: save preferred, then overwrite udp_port
+            config.udp_port = preferred
+            config._preferred_udp_port = preferred
+            config.udp_port = auto_selected
+
+            # Runtime should use the auto-selected port
+            self.assertEqual(config.udp_port, auto_selected)
+
+            # But save() should write the preferred port to disk
+            config.save()
+            with open(tmp_path, "r") as f:
+                saved = json.load(f)
+            self.assertEqual(saved["udp_port"], preferred,
+                             "config.save() must persist the user's preferred port, not the auto-selected one")
+        finally:
+            os.unlink(tmp_path)
+
+    def test_config_save_without_auto_selection_saves_udp_port_normally(self):
+        """When no auto-selection occurred, save() should write udp_port as-is."""
+        import json
+        import tempfile
+        from config import Config
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            tmp_path = f.name
+
+        try:
+            config = Config()
+            config._config_path = tmp_path
+            config.udp_port = 9999
+            # _preferred_udp_port stays 0 (default) — no auto-selection happened
+
+            config.save()
+            with open(tmp_path, "r") as f:
+                saved = json.load(f)
+            self.assertEqual(saved["udp_port"], 9999)
+        finally:
+            os.unlink(tmp_path)
+
 
 class TestPortConflictEdgeCases(unittest.TestCase):
     """Edge cases for PortConflict message formatting."""

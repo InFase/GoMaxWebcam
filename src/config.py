@@ -4,6 +4,20 @@ config.py — Settings management for GoPro Bridge
 Loads/saves configuration from %APPDATA%/GoProBridge/config.json.
 All timing and recovery parameters are user-tunable via config.json
 while the GUI stays simple.
+
+Diagnostics flags:
+    ffmpeg_debug (bool, default False):
+        When set to true in config.json, enables verbose ffmpeg diagnostics:
+        1. Adds '-loglevel debug' to the ffmpeg command line so ffmpeg emits
+           detailed decode/demux/protocol information to stderr.
+        2. Logs every ffmpeg stderr line at DEBUG level continuously (not just
+           error/fatal/invalid keywords).
+        Useful for troubleshooting stream startup failures, codec issues, or
+        UDP packet loss. Generates significant log volume — disable after
+        diagnosing the issue.
+
+        To enable, edit %APPDATA%/GoProBridge/config.json:
+            "ffmpeg_debug": true
 """
 
 import json
@@ -66,11 +80,18 @@ class Config:
 
     # --- Recovery timing ---
     reconnect_delay: float = 2.0          # Seconds to wait before reconnect attempt
+    reconnect_max_delay: float = 30.0     # Max seconds between reconnect attempts (caps exponential backoff)
     reconnect_max_retries: int = 0        # 0 = infinite retries
     ncm_adapter_wait: float = 5.0         # Seconds to wait for NCM network adapter after USB detection
     idle_reset_delay: float = 1.0         # Seconds to wait during IDLE workaround
     stream_startup_timeout: float = 10.0  # Max seconds to wait for first frame after ffmpeg restart
     ffmpeg_port_release_delay: float = 0.5  # Seconds to wait after stopping ffmpeg for UDP port release
+
+    # --- Staleness detection ---
+    stale_poll_interval: float = 0.5      # Seconds between staleness monitor polls of FrameBuffer
+
+    # --- Diagnostics ---
+    ffmpeg_debug: bool = False           # Enable verbose ffmpeg logging (-loglevel debug + continuous stderr capture)
 
     # --- Logging ---
     log_level: str = "INFO"
@@ -80,6 +101,7 @@ class Config:
 
     # --- Internal (not saved) ---
     _config_path: str = field(default="", repr=False)
+    _preferred_udp_port: int = field(default=0, repr=False)  # Original user-configured port before auto-selection
 
     @classmethod
     def load(cls) -> "Config":
@@ -100,12 +122,15 @@ class Config:
                 _log.debug(
                     "[EVENT:config] Key settings: resolution=%s, fov=%s, "
                     "udp_port=%s, stream=%sx%s@%sfps, keepalive=%.1fs, "
-                    "reconnect_delay=%.1fs, ncm_adapter_wait=%.1fs, log_level=%s",
+                    "reconnect_delay=%.1fs, reconnect_max_delay=%.1fs, "
+                    "ncm_adapter_wait=%.1fs, stale_poll_interval=%.1fs, "
+                    "ffmpeg_debug=%s, log_level=%s",
                     config.resolution, config.fov,
                     config.udp_port, config.stream_width, config.stream_height,
                     config.stream_fps, config.keepalive_interval,
-                    config.reconnect_delay, config.ncm_adapter_wait,
-                    config.log_level,
+                    config.reconnect_delay, config.reconnect_max_delay,
+                    config.ncm_adapter_wait, config.stale_poll_interval,
+                    config.ffmpeg_debug, config.log_level,
                 )
             except (json.JSONDecodeError, OSError) as e:
                 # If config is corrupted, use defaults and overwrite
@@ -124,12 +149,22 @@ class Config:
         return config
 
     def save(self):
-        """Write current config to disk."""
+        """Write current config to disk.
+
+        If udp_port was changed at runtime by ephemeral port auto-selection,
+        the original user-configured port is saved instead so auto-selected
+        ports are never persisted to config.json.
+        """
         config_path = Path(self._config_path) if self._config_path else _appdata_dir() / "config.json"
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Convert to dict, excluding internal fields
         data = {k: v for k, v in asdict(self).items() if not k.startswith("_")}
+
+        # Restore the user's preferred UDP port so ephemeral auto-selection
+        # (e.g. 8554 busy → 8555) is never persisted to disk.
+        if self._preferred_udp_port:
+            data["udp_port"] = self._preferred_udp_port
 
         with open(config_path, "w") as f:
             json.dump(data, f, indent=2)
