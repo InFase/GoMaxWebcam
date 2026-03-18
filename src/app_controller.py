@@ -263,6 +263,12 @@ class AppController:
         log.info("[EVENT:pause] Pausing webcam stream")
         self._emit_status("Pausing webcam...", "info")
 
+        # Stop monitoring FIRST — before killing ffmpeg, so the disconnect
+        # detector and staleness monitor don't see the intentional shutdown
+        # as a crash/disconnect and trigger false recovery.
+        self._stop_staleness_monitor()
+        self._stop_disconnect_detector()
+
         # Enter freeze-frame so downstream apps keep seeing the last frame
         if self._frame_pipeline:
             self._frame_pipeline.enter_freeze_frame()
@@ -279,9 +285,6 @@ class AppController:
             self.gopro.stop_webcam()
         except Exception:
             log.debug("Failed to stop webcam during pause")
-
-        # Stop staleness monitor (no frames expected while paused)
-        self._stop_staleness_monitor()
 
         self._set_state(AppState.PAUSED)
         self._emit_status("Webcam paused — freeze-frame active", "info")
@@ -323,7 +326,8 @@ class AppController:
             self._emit_status(f"Failed to resume stream: {e}", "error")
             return
 
-        # Restart staleness monitor
+        # Restart monitoring (stopped during pause/charge)
+        self._start_disconnect_detector()
         self._start_staleness_monitor()
 
         self._set_state(AppState.STREAMING)
@@ -342,6 +346,12 @@ class AppController:
         log.info("[EVENT:charge_mode] Entering charge mode")
         self._emit_status("Entering charge mode...", "info")
 
+        # Stop monitoring FIRST — before killing ffmpeg, so the disconnect
+        # detector and staleness monitor don't see the intentional shutdown
+        # as a crash/disconnect and trigger false recovery.
+        self._stop_staleness_monitor()
+        self._stop_disconnect_detector()
+
         # Enter freeze-frame first
         if self._frame_pipeline:
             self._frame_pipeline.enter_freeze_frame()
@@ -352,9 +362,6 @@ class AppController:
                 self._stream_reader.stop()
             except Exception:
                 log.debug("Failed to stop stream reader for charge mode")
-
-        # Stop staleness monitor
-        self._stop_staleness_monitor()
 
         # Fully exit webcam mode (not just stop — exit frees more power)
         try:
@@ -650,7 +657,7 @@ class AppController:
         """Called by DisconnectDetector when USB disconnect is detected.
 
         This fires INSTANTLY when the USB cable is yanked — much faster than
-        the keep-alive polling loop (which takes 3 × 2.5s = 7.5s to detect).
+        the keep-alive polling loop (which takes 3 x 2.5s = 7.5s to detect).
 
         The disconnect detector has already triggered freeze-frame on the
         pipeline. Here we:
@@ -658,6 +665,11 @@ class AppController:
           2. Emit a status update for the GUI
           3. Trigger recovery if not already in progress
         """
+        # Don't trigger recovery if we intentionally stopped streaming
+        if self.state in (AppState.PAUSED, AppState.CHARGE_MODE, AppState.STOPPED):
+            log.debug("[EVENT:disconnection] Ignoring disconnect in %s state", self.state.name)
+            return
+
         log.warning(
             "[EVENT:disconnection] USB disconnect detected by disconnect detector — "
             "freeze-frame activated, starting recovery"
@@ -694,6 +706,11 @@ class AppController:
 
         This is MUCH faster than the full recovery (~1-2s vs 10-30s).
         """
+        # Don't trigger recovery if we intentionally stopped ffmpeg
+        if self.state in (AppState.PAUSED, AppState.CHARGE_MODE, AppState.STOPPED):
+            log.debug("[EVENT:ffmpeg_crash] Ignoring ffmpeg exit in %s state (intentional)", self.state.name)
+            return
+
         log.warning(
             "[EVENT:ffmpeg_crash] ffmpeg process crashed — "
             "GoPro likely still connected, attempting quick recovery"
@@ -1552,6 +1569,11 @@ class AppController:
         while self._running and not self._stop_event.is_set():
             if self._stop_event.wait(timeout=self.config.keepalive_interval):
                 break
+
+            # Skip keep-alive when intentionally paused/charging
+            if self.state in (AppState.PAUSED, AppState.CHARGE_MODE):
+                consecutive_failures = 0
+                continue
 
             alive = self.gopro.keep_alive()
 
