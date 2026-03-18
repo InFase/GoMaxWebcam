@@ -1110,11 +1110,10 @@ class GoProConnection:
         elif status == WebcamStatus.READY:
             log.info("[EVENT:stream_start] Camera is READY — proceeding to start directly")
 
-        # Phase 1.8: Preview warmup — if status is OFF, call preview to prime the camera
+        # Phase 1.8: Preview warmup — if status is OFF, call preview to prime the sensor
         if status == WebcamStatus.OFF:
             log.info("[EVENT:stream_start] Status is OFF — sending preview warmup")
             self._api_get("/gopro/webcam/preview", timeout=_TIMEOUT_NORMAL)
-            time.sleep(0.3)
 
         # Step 5: Send webcam/start with parameters
         endpoint = f"/gopro/webcam/start?res={res}&fov={field_of_view}&port={self.config.udp_port}"
@@ -1186,8 +1185,8 @@ class GoProConnection:
                     return False
 
         # Step 6: Wait for READY or STREAMING
-        for attempt in range(20):  # Up to 10 seconds of polling
-            time.sleep(0.5)
+        for attempt in range(50):  # Up to 10 seconds of polling (0.2s intervals)
+            time.sleep(0.2)
             status = self.webcam_status()
 
             # Phase 1.7: Accept READY and STREAMING immediately; also accept

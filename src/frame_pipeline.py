@@ -384,10 +384,14 @@ class FramePipeline:
         self._drain_thread.start()
 
     def _stop_drain_thread(self):
-        """Stop the background drain thread."""
+        """Signal the background drain thread to stop.
+
+        Does NOT join/block — the drain thread is a daemon and will exit
+        after its current read_frame() completes (max ~33ms at 30fps).
+        Joining would block exit_freeze_frame() for up to 33ms, defeating
+        the purpose of instant resume.
+        """
         self._drain_stop_event.set()
-        if self._drain_thread is not None and self._drain_thread.is_alive():
-            self._drain_thread.join(timeout=2.0)
         self._drain_thread = None
 
     def swap_reader(self, new_reader):
