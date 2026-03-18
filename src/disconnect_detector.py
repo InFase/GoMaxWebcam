@@ -74,6 +74,7 @@ class DisconnectDetector:
         stream_reader=None,
         config=None,
         usb_listener=None,
+        startup_grace: float = 0.0,
     ):
         """Initialize the disconnect detector.
 
@@ -91,6 +92,7 @@ class DisconnectDetector:
         self._connection = connection
         self._stream_reader = stream_reader
         self._config = config
+        self._startup_grace = startup_grace
 
         # USB event listener — either externally owned or created internally
         self._usb_listener = None
@@ -459,6 +461,14 @@ class DisconnectDetector:
         it's a pure ffmpeg crash.
         """
         was_running = False
+
+        if self._startup_grace > 0:
+            log.debug(
+                "[EVENT:disconnect_detector] Startup grace: %.1fs before first health check",
+                self._startup_grace,
+            )
+            if self._stop_event.wait(timeout=self._startup_grace):
+                return  # Stopped during grace period
 
         while not self._stop_event.is_set():
             if self._stop_event.wait(timeout=self._health_check_interval):

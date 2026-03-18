@@ -94,10 +94,25 @@ class WebcamStatus(IntEnum):
     """
     OFF = 0
     IDLE = 1
-    READY = 2
-    STREAMING = 3
-    UNAVAILABLE = 4
+    READY = 2           # HIGH_POWER_PREVIEW — camera is actively streaming
+    STREAMING = 3       # LOW_POWER_PREVIEW — preview mode
+    UNAVAILABLE = 4     # Hero 13 may return this during normal streaming
     UNKNOWN = -1
+
+
+class WebcamError(IntEnum):
+    """GoPro webcam error codes from /gopro/webcam/start response.
+    Per official GoPro Kotlin SDK (Webcam.kt).
+    """
+    SUCCESS = 0
+    SET_PRESET = 1
+    SET_WINDOW_SIZE = 2
+    EXEC_STREAM = 3
+    SHUTTER = 4
+    COM_TIMEOUT = 5
+    INVALID_PARAM = 6
+    UNAVAILABLE = 7
+    EXIT = 8
 
 
 class CameraMode(IntEnum):
@@ -223,6 +238,9 @@ class GoProConnection:
         # Track the active resolution/FOV so we can detect change requests
         self._current_resolution: Optional[int] = None
         self._current_fov: Optional[int] = None
+
+        # Phase 1.3: Track whether the last stop was user-initiated
+        self._last_stop_was_intentional: bool = False
 
         # Callback for status updates: fn(message: str, level: str)
         # level is one of: "info", "warning", "error", "success"
@@ -1073,10 +1091,15 @@ class GoProConnection:
         # - STREAMING: already streaming, send stop first then start
         # - IDLE: stale state from USB connect, needs the start/stop workaround
         if status == WebcamStatus.IDLE:
-            log.info("[EVENT:state_change] Camera in IDLE state — performing reset workaround")
-            self.reset_webcam_state()
-            status = self.webcam_status()
-            log.info("[EVENT:state_change] Status after IDLE reset: %s", status.name)
+            # Phase 1.6: Skip IDLE workaround if the last stop was intentional
+            if self._last_stop_was_intentional:
+                log.info("[EVENT:state_change] Camera in IDLE but last stop was intentional — skipping reset")
+                self._last_stop_was_intentional = False
+            else:
+                log.info("[EVENT:state_change] Camera in IDLE state — performing reset workaround")
+                self.reset_webcam_state()
+                status = self.webcam_status()
+                log.info("[EVENT:state_change] Status after IDLE reset: %s", status.name)
         elif status == WebcamStatus.STREAMING:
             log.info("[EVENT:stream_stop] Camera is STREAMING — stopping first")
             self._notify("Stopping current stream...", "info")
@@ -1086,6 +1109,12 @@ class GoProConnection:
             log.info("[EVENT:state_change] Status after stop: %s", status.name)
         elif status == WebcamStatus.READY:
             log.info("[EVENT:stream_start] Camera is READY — proceeding to start directly")
+
+        # Phase 1.8: Preview warmup — if status is OFF, call preview to prime the camera
+        if status == WebcamStatus.OFF:
+            log.info("[EVENT:stream_start] Status is OFF — sending preview warmup")
+            self._api_get("/gopro/webcam/preview", timeout=_TIMEOUT_NORMAL)
+            time.sleep(0.3)
 
         # Step 5: Send webcam/start with parameters
         endpoint = f"/gopro/webcam/start?res={res}&fov={field_of_view}&port={self.config.udp_port}"
@@ -1128,46 +1157,76 @@ class GoProConnection:
         if error_code != 0:
             log.warning("[EVENT:stream_error] Webcam start returned error code %d", error_code)
             self._notify(f"Webcam start returned error code {error_code}", "error")
-            if status != WebcamStatus.IDLE:
-                log.info("[EVENT:stream_start] Trying IDLE workaround as fallback after error %d", error_code)
-                self.reset_webcam_state()
+
+            # Phase 1.5: Handle specific error codes using WebcamError enum
+            if error_code == WebcamError.SHUTTER:
+                # Error 4: shutter stuck — release it and retry once
+                log.info("[EVENT:stream_start] SHUTTER error — releasing shutter and retrying")
+                self._api_get("/gopro/camera/shutter?mode=0", timeout=_TIMEOUT_NORMAL)
+                time.sleep(1.0)
                 result = self._api_get(endpoint, timeout=_TIMEOUT_START)
                 if result is None or result.get("error", -1) != 0:
-                    self._notify("Webcam start failed after retry", "error")
+                    self._notify("Webcam start failed after shutter release retry", "error")
                     return False
-            else:
+            elif error_code == WebcamError.UNAVAILABLE:
+                # Error 7: camera truly unavailable — bail early
+                self._notify("Camera reports UNAVAILABLE — cannot start webcam", "error")
                 return False
+            else:
+                # Other errors: refresh status, then try IDLE workaround as fallback
+                status = self.webcam_status()
+                if status != WebcamStatus.IDLE:
+                    log.info("[EVENT:stream_start] Trying IDLE workaround as fallback after error %d", error_code)
+                    self.reset_webcam_state()
+                    result = self._api_get(endpoint, timeout=_TIMEOUT_START)
+                    if result is None or result.get("error", -1) != 0:
+                        self._notify("Webcam start failed after retry", "error")
+                        return False
+                else:
+                    return False
 
         # Step 6: Wait for READY or STREAMING
         for attempt in range(20):  # Up to 10 seconds of polling
             time.sleep(0.5)
             status = self.webcam_status()
 
+            # Phase 1.7: Accept READY and STREAMING immediately; also accept
+            # UNAVAILABLE (status 4) as streaming for Hero 13 compatibility.
             if status == WebcamStatus.STREAMING:
                 self._set_state(ConnectionState.STREAMING)
                 self._current_resolution = res
                 self._current_fov = field_of_view
                 self._notify("GoPro webcam is streaming!", "success")
+                self._last_stop_was_intentional = False  # Phase 1.9
                 return True
             elif status == WebcamStatus.READY:
-                if attempt >= 6:  # After 3s of READY, accept it
-                    self._set_state(ConnectionState.STREAMING)
-                    self._current_resolution = res
-                    self._current_fov = field_of_view
-                    self._notify("GoPro webcam mode active (READY)", "success")
-                    return True
-                log.debug("Camera is READY, waiting for STREAMING... (attempt %d)", attempt + 1)
+                self._set_state(ConnectionState.STREAMING)
+                self._current_resolution = res
+                self._current_fov = field_of_view
+                self._notify("GoPro webcam mode active (READY)", "success")
+                self._last_stop_was_intentional = False  # Phase 1.9
+                return True
+            elif status == WebcamStatus.UNAVAILABLE:
+                # Hero 13 may return UNAVAILABLE while actually streaming
+                log.info("[EVENT:stream_start] Hero 13 compat: accepting UNAVAILABLE as streaming")
+                self._set_state(ConnectionState.STREAMING)
+                self._current_resolution = res
+                self._current_fov = field_of_view
+                self._notify("GoPro webcam mode active (Hero 13 compat)", "success")
+                self._last_stop_was_intentional = False  # Phase 1.9
+                return True
             elif status == WebcamStatus.OFF:
                 log.debug("Still OFF, processing start... (attempt %d)", attempt + 1)
             else:
                 log.debug("Status %s during startup (attempt %d)", status.name, attempt + 1)
 
         final_status = self.webcam_status()
-        if final_status in (WebcamStatus.READY, WebcamStatus.STREAMING):
+        if final_status in (WebcamStatus.READY, WebcamStatus.STREAMING, WebcamStatus.UNAVAILABLE):
             self._set_state(ConnectionState.STREAMING)
             self._current_resolution = res
             self._current_fov = field_of_view
             self._notify("GoPro webcam mode active", "success")
+            self._last_stop_was_intentional = False  # Phase 1.9
             return True
 
         self._notify(
@@ -1183,6 +1242,7 @@ class GoProConnection:
         This calls /gopro/webcam/stop which transitions to READY state,
         NOT fully out of webcam mode. Use exit_webcam() to fully leave.
         """
+        self._last_stop_was_intentional = True  # Phase 1.4
         self._notify("Stopping webcam mode...", "info")
         result = self._api_get("/gopro/webcam/stop", timeout=_TIMEOUT_NORMAL)
         if result is None:
@@ -1211,6 +1271,7 @@ class GoProConnection:
 
         The full clean sequence is: stop → exit → (optionally toggle USB control)
         """
+        self._last_stop_was_intentional = True  # Phase 1.4
         log.info("[EVENT:stream_stop] Sending webcam/exit to fully leave webcam mode")
         result = self._api_get("/gopro/webcam/exit", timeout=_TIMEOUT_NORMAL)
         if result is None:
@@ -1475,6 +1536,7 @@ class GoProConnection:
         private fields directly.
         """
         log.info("[EVENT:reset_for_recovery] Clearing connection state for recovery")
+        self._last_stop_was_intentional = False  # Phase 1.9
         with self._lock:
             self.ip = None
             self.base_url = None

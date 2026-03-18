@@ -122,6 +122,12 @@ def _set_obs_registry_name(name: str) -> bool:
     if platform.system() != "Windows":
         return False
 
+    # Phase 5.1: Skip if registry already has the desired name
+    current = _get_obs_registry_name()
+    if current == name:
+        log.debug("Registry name already set to '%s'", name)
+        return True
+
     # Try direct write first (works if already admin)
     try:
         import winreg
@@ -145,10 +151,16 @@ def _set_obs_registry_name(name: str) -> bool:
     except (OSError, FileNotFoundError):
         return False
 
+    # Phase 5.2: Avoid repeated UAC prompts within the same session
+    import tempfile
+    marker_path = os.path.join(tempfile.gettempdir(), "gopro_bridge_reg_attempted.marker")
+    if os.path.exists(marker_path):
+        log.debug("Registry rename already attempted this session")
+        return False
+
     # Fallback: use elevated reg.exe (triggers one UAC prompt via a batch)
     try:
         import ctypes
-        import tempfile
         clsid_path = f"HKLM\\{_OBS_VIRTUALCAM_CLSID}"
         instance_path = f"HKLM\\{_OBS_VIRTUALCAM_INSTANCE}"
 
@@ -169,9 +181,21 @@ def _set_obs_registry_name(name: str) -> bool:
         if result > 32:
             log.info("[EVENT:vcam_start] OBS VirtualCam renamed to '%s' via elevated batch", name)
             time.sleep(1.0)  # Wait for the batch + registry to settle
+            # Phase 5.3: Record that elevation was attempted
+            try:
+                with open(marker_path, "w") as f:
+                    f.write(name)
+            except OSError:
+                pass
             return True
         else:
             log.warning("[EVENT:vcam_error] Elevated rename failed (code %d)", result)
+            # Phase 5.4: Record denial to avoid repeated UAC prompts
+            try:
+                with open(marker_path, "w") as f:
+                    f.write("denied")
+            except OSError:
+                pass
             return False
     except Exception as e:
         log.debug("Elevated registry rename failed: %s", e)
@@ -795,6 +819,11 @@ class VirtualCamera:
                         "'%s' (rename to '%s' requires admin rights)",
                         _OBS_DEFAULT_NAME, self.device_name,
                     )
+
+            # Phase 5.5: Update DirectShow FriendlyName for Unity Capture too
+            # (same CLSID {5C2CD55C-...} DLL). No-op if name already matches.
+            if backend == "unitycapture":
+                _set_obs_registry_name(self.device_name)
 
             with self._lock:
                 self._cam = cam

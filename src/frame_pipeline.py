@@ -125,6 +125,10 @@ class FramePipeline:
         self._reader_swap_time: Optional[float] = None
         self._reader_warmup_grace: float = 5.0  # seconds to allow new reader startup
 
+        # Drain thread — keeps ffmpeg stdout pipe from filling during freeze
+        self._drain_thread: Optional[threading.Thread] = None
+        self._drain_stop_event = threading.Event()
+
         # Callbacks
         self.on_state_change: Optional[Callable[[PipelineState], None]] = None
         self.on_stream_lost: Optional[Callable[[], None]] = None
@@ -286,6 +290,7 @@ class FramePipeline:
         log.info("[EVENT:stream_stop] Stopping frame pipeline...")
         self._set_state(PipelineState.STOPPING)
         self._stop_event.set()
+        self._stop_drain_thread()
 
         if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=5.0)
@@ -315,6 +320,7 @@ class FramePipeline:
         self._freeze_start_time = time.monotonic()
         self._freeze_frame_count = 0
         self._set_state(PipelineState.FREEZE_FRAME)
+        self._start_drain_thread()
 
         if self.on_stream_lost:
             try:
@@ -330,6 +336,7 @@ class FramePipeline:
         if self._state != PipelineState.FREEZE_FRAME:
             return
 
+        self._stop_drain_thread()
         duration = self.freeze_duration
         log.info(
             "[EVENT:frame_recovery] Exiting freeze-frame mode "
@@ -345,6 +352,43 @@ class FramePipeline:
                 self.on_stream_recovered()
             except Exception:
                 log.exception("Error in on_stream_recovered callback")
+
+    def _start_drain_thread(self):
+        """Start background thread to drain ffmpeg stdout during freeze-frame.
+
+        Prevents ffmpeg stdout pipe (4KB on Windows) from filling up and
+        blocking ffmpeg when the pipeline stops reading frames.
+        """
+        if self._drain_thread is not None and self._drain_thread.is_alive():
+            return
+        self._drain_stop_event.clear()
+
+        def _drain_loop():
+            log.debug("Drain thread started")
+            while not self._drain_stop_event.is_set() and not self._stop_event.is_set():
+                with self._swap_lock:
+                    reader = self._reader
+                if reader is None:
+                    break
+                try:
+                    frame = reader.read_frame()
+                    if frame is None:
+                        self._drain_stop_event.wait(timeout=0.1)
+                except Exception:
+                    break
+            log.debug("Drain thread exited")
+
+        self._drain_thread = threading.Thread(
+            target=_drain_loop, name="frame-pipeline-drain", daemon=True,
+        )
+        self._drain_thread.start()
+
+    def _stop_drain_thread(self):
+        """Stop the background drain thread."""
+        self._drain_stop_event.set()
+        if self._drain_thread is not None and self._drain_thread.is_alive():
+            self._drain_thread.join(timeout=2.0)
+        self._drain_thread = None
 
     def swap_reader(self, new_reader):
         """Replace the stream reader (after reconnection).
