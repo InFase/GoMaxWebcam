@@ -138,6 +138,7 @@ class AppController:
         # to detect stream freezes independently of USB events and ffmpeg health
         self._staleness_thread: Optional[threading.Thread] = None
         self._staleness_interval: float = self.config.stale_poll_interval
+        self._staleness_stop_event = threading.Event()  # Dedicated stop for staleness monitor
         self._staleness_was_stale: bool = True  # Start True to avoid false trigger before first frame arrives
 
         # Recovery state tracking
@@ -263,9 +264,11 @@ class AppController:
         log.info("[EVENT:pause] Pausing webcam stream")
         self._emit_status("Pausing webcam...", "info")
 
-        # Stop monitoring FIRST — before killing ffmpeg, so the disconnect
-        # detector and staleness monitor don't see the intentional shutdown
-        # as a crash/disconnect and trigger false recovery.
+        # Set state FIRST so all monitoring callbacks see PAUSED immediately
+        # and don't trigger false recovery during the shutdown sequence.
+        self._set_state(AppState.PAUSED)
+
+        # Stop monitoring — after state change so callbacks are guarded
         self._stop_staleness_monitor()
         self._stop_disconnect_detector()
 
@@ -286,7 +289,6 @@ class AppController:
         except Exception:
             log.debug("Failed to stop webcam during pause")
 
-        self._set_state(AppState.PAUSED)
         self._emit_status("Webcam paused — freeze-frame active", "info")
 
     def resume_webcam(self):
@@ -326,11 +328,13 @@ class AppController:
             self._emit_status(f"Failed to resume stream: {e}", "error")
             return
 
+        # Set state BEFORE restarting monitors so their callbacks see STREAMING
+        self._set_state(AppState.STREAMING)
+
         # Restart monitoring (stopped during pause/charge)
         self._start_disconnect_detector()
         self._start_staleness_monitor()
 
-        self._set_state(AppState.STREAMING)
         self._emit_status("Live video restored!", "success")
 
     def enter_charge_mode(self):
@@ -346,9 +350,11 @@ class AppController:
         log.info("[EVENT:charge_mode] Entering charge mode")
         self._emit_status("Entering charge mode...", "info")
 
-        # Stop monitoring FIRST — before killing ffmpeg, so the disconnect
-        # detector and staleness monitor don't see the intentional shutdown
-        # as a crash/disconnect and trigger false recovery.
+        # Set state FIRST so all monitoring callbacks see CHARGE_MODE
+        # immediately and don't trigger false recovery during shutdown.
+        self._set_state(AppState.CHARGE_MODE)
+
+        # Stop monitoring — after state change so callbacks are guarded
         self._stop_staleness_monitor()
         self._stop_disconnect_detector()
 
@@ -373,7 +379,6 @@ class AppController:
         except Exception:
             log.debug("Failed to exit webcam for charge mode")
 
-        self._set_state(AppState.CHARGE_MODE)
         self._emit_status("Charge mode active — webcam stopped to maximize charging", "info")
 
     # ── Pipeline Access (for GUI stats) ────────────────────────────
@@ -840,6 +845,7 @@ class AppController:
             return
 
         self._staleness_was_stale = False
+        self._staleness_stop_event.clear()
         self._staleness_thread = threading.Thread(
             target=self._staleness_monitor_loop,
             name="StalenessMonitor",
@@ -853,10 +859,15 @@ class AppController:
         )
 
     def _stop_staleness_monitor(self):
-        """Stop the staleness monitor thread."""
+        """Stop the staleness monitor thread.
+
+        Uses a dedicated stop event (not the shared _stop_event) so the
+        monitor can be stopped independently during pause/charge mode
+        without affecting other threads.
+        """
+        self._staleness_stop_event.set()
         if self._staleness_thread is not None and self._staleness_thread.is_alive():
-            # _stop_event is shared; the monitor loop checks it
-            self._staleness_thread.join(timeout=2.0)
+            self._staleness_thread.join(timeout=3.0)
         self._staleness_thread = None
 
     def _staleness_monitor_loop(self):
@@ -874,8 +885,10 @@ class AppController:
         """
         log.debug("[EVENT:staleness_monitor] Monitor loop started")
 
-        while not self._stop_event.is_set():
-            if self._stop_event.wait(timeout=self._staleness_interval):
+        while not self._stop_event.is_set() and not self._staleness_stop_event.is_set():
+            if self._staleness_stop_event.wait(timeout=self._staleness_interval):
+                break
+            if self._stop_event.is_set():
                 break
 
             buffer = self._frame_buffer
@@ -907,13 +920,16 @@ class AppController:
                     "warning",
                 )
 
-                # Trigger recovery if not already in progress
-                # Use _recovery_lock to safely check _is_recovering and
-                # prevent duplicate recovery triggers from concurrent threads
-                with self._recovery_lock:
-                    already_recovering = self._is_recovering
-                if not already_recovering:
-                    self._auto_recover()
+                # Trigger recovery if not already in progress and not
+                # intentionally paused/charging (monitors should have been
+                # stopped, but guard against race conditions)
+                if self.state in (AppState.PAUSED, AppState.CHARGE_MODE, AppState.STOPPED):
+                    log.debug("[EVENT:staleness_monitor] Ignoring stale in %s state", self.state.name)
+                else:
+                    with self._recovery_lock:
+                        already_recovering = self._is_recovering
+                    if not already_recovering:
+                        self._auto_recover()
 
             elif not is_stale and self._staleness_was_stale:
                 # Stale → fresh transition: reset edge detection
