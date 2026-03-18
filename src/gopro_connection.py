@@ -419,8 +419,10 @@ class GoProConnection:
                 "warning",
             )
 
-        if not self.reset_webcam_state():
-            self._notify("IDLE workaround had issues (continuing anyway)", "warning")
+        # NOTE: We do NOT call reset_webcam_state() here. The IDLE workaround
+        # is handled by start_webcam() when it detects IDLE state. Calling it
+        # here AND in start_webcam() causes double start/stop cycling on the
+        # camera, which can put it into UNAVAILABLE state.
 
         self._start_keepalive()
 
@@ -968,6 +970,11 @@ class GoProConnection:
             self._notify("Webcam state is clean (OFF)", "info")
             return True
 
+        if current == WebcamStatus.UNAVAILABLE:
+            log.warning("[EVENT:state_change] Camera is UNAVAILABLE — skipping IDLE workaround")
+            self._notify("Camera unavailable — cannot reset webcam state", "warning")
+            return False
+
         # Step 1: Send start to trigger state transition
         result = self._api_get("/gopro/webcam/start", timeout=_TIMEOUT_START)
         if result is None:
@@ -1182,8 +1189,12 @@ class GoProConnection:
             self._notify("Failed to stop webcam (camera may be disconnected)", "warning")
             return False
 
+        # /gopro/webcam/stop transitions camera to READY (not OFF).
+        # Set the internal status to READY to match the actual camera state.
+        # Previously this was set to OFF which caused start_webcam() to skip
+        # the status check and trigger unnecessary IDLE reset cycles.
         with self._lock:
-            self._webcam_status = WebcamStatus.OFF
+            self._webcam_status = WebcamStatus.READY
         if self._state == ConnectionState.STREAMING:
             self._set_state(ConnectionState.CONNECTED)
 

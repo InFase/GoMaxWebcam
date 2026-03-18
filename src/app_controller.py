@@ -668,7 +668,9 @@ class AppController:
         )
 
         # Trigger auto-recovery (skip if already recovering)
-        if not self._is_recovering:
+        with self._recovery_lock:
+            already_recovering = self._is_recovering
+        if not already_recovering:
             self._auto_recover()
 
     def _on_detector_reconnect_ready(self, device_id: str):
@@ -702,7 +704,9 @@ class AppController:
         )
 
         # Skip if already recovering (USB disconnect recovery takes precedence)
-        if self._is_recovering:
+        with self._recovery_lock:
+            already_recovering = self._is_recovering
+        if already_recovering:
             log.debug("[EVENT:ffmpeg_crash] Full recovery already in progress, skipping ffmpeg recovery")
             return
 
