@@ -761,11 +761,26 @@ class VirtualCamera:
                 "backend": backend,
             }
 
-            # Unity Capture supports custom device names via the 'device' param
+            # Unity Capture supports custom device names via the 'device' param.
+            # Try with the custom name first; if it fails (e.g., DLL not fully
+            # registered via regsvr32), fall back to opening without a name
+            # which uses the default "Unity Video Capture" device.
+            cam = None
             if backend == "unitycapture":
                 cam_kwargs["device"] = self.device_name
+                try:
+                    cam = pyvirtualcam.Camera(**cam_kwargs)
+                except RuntimeError as e:
+                    log.warning(
+                        "[EVENT:vcam_start] Could not open Unity Capture with "
+                        "device name '%s': %s — retrying without device name",
+                        self.device_name, e,
+                    )
+                    del cam_kwargs["device"]
+                    cam = pyvirtualcam.Camera(**cam_kwargs)
 
-            cam = pyvirtualcam.Camera(**cam_kwargs)
+            if cam is None:
+                cam = pyvirtualcam.Camera(**cam_kwargs)
 
             # Rename OBS device to desired name now that we've opened it
             if backend == "obs" and self.device_name != _OBS_DEFAULT_NAME:
