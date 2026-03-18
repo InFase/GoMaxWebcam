@@ -166,6 +166,11 @@ class AppController:
         self._running = True
         self._stop_event.clear()
         self._usb_reconnect_event.clear()
+        # Reset recovery flag — if a previous session's recovery thread didn't
+        # finish its finally block before stop() timed out, this flag may be
+        # stuck True, which would block all recovery in the new session.
+        with self._recovery_lock:
+            self._is_recovering = False
         self._startup_thread = threading.Thread(
             target=self._startup_flow,
             name="StartupFlow",
@@ -1581,9 +1586,11 @@ class AppController:
         """
         consecutive_failures = 0
         max_failures_before_reconnect = 3
+        # Enforce minimum keep-alive interval to avoid spamming the camera
+        keepalive_interval = max(self.config.keepalive_interval, 1.0)
 
         while self._running and not self._stop_event.is_set():
-            if self._stop_event.wait(timeout=self.config.keepalive_interval):
+            if self._stop_event.wait(timeout=keepalive_interval):
                 break
 
             # Skip keep-alive when intentionally paused/charging
@@ -1917,6 +1924,12 @@ class AppController:
             f"Changing resolution to {new_width}x{new_height}...",
             "info",
         )
+
+        # Step 0: Stop monitoring BEFORE killing ffmpeg — prevents false
+        # recovery from staleness monitor and disconnect detector seeing the
+        # intentional shutdown during resolution change.
+        self._stop_staleness_monitor()
+        self._stop_disconnect_detector()
 
         # Step 1: Enter freeze-frame so downstream apps keep seeing valid video
         if self._frame_pipeline is not None and self._frame_pipeline.is_running:
