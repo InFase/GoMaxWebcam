@@ -315,41 +315,86 @@ class DependencyChecker:
 
     def check_unity_capture(self) -> DependencyStatus:
         """
-        Determine whether the Unity Capture virtual camera driver is registered.
+        Determine whether a virtual camera backend is available.
 
-        Checks the Windows registry for the COM CLSID
-        ``{5C2CD55C-92AD-4999-8666-912BD3E700AF}`` under HKEY_CLASSES_ROOT.
+        Checks for Unity Capture first (preferred), then OBS Virtual Camera
+        as a fallback. Either one satisfies the requirement since pyvirtualcam
+        supports both backends.
 
-        Returns a DependencyStatus with installed=True if the key exists, or
-        installed=False with an error message if not.
+        Checks:
+          1. Unity Capture COM CLSID in registry
+          2. OBS Virtual Camera COM CLSID in registry
+          3. pyvirtualcam backend import check (catches edge cases)
+
+        Returns a DependencyStatus with installed=True if any backend is
+        available, or installed=False if none are found.
         """
+        # Check 1: Unity Capture CLSID
         try:
             with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, _UNITY_CLSID_REG_PATH):
                 log.debug("Unity Capture CLSID registry key found.")
                 return DependencyStatus(
                     name="unity_capture",
                     installed=True,
-                    path=_UNITY_CLSID_REG_PATH,
+                    path="Unity Capture (registered)",
                 )
-        except FileNotFoundError:
-            msg = (
-                f"Unity Capture CLSID {UNITY_CAPTURE_CLSID} not found in registry. "
-                "Run install_unity_capture() to register the driver."
+        except (FileNotFoundError, OSError):
+            pass
+
+        # Check 2: OBS Virtual Camera CLSID
+        obs_clsid_path = r"CLSID\{5C2CD55C-92AD-4999-8666-912BD3E70010}"
+        try:
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, obs_clsid_path):
+                log.debug("OBS Virtual Camera CLSID registry key found.")
+                return DependencyStatus(
+                    name="unity_capture",
+                    installed=True,
+                    path="OBS Virtual Camera (registered)",
+                )
+        except (FileNotFoundError, OSError):
+            pass
+
+        # Check 3: Try pyvirtualcam backend imports as final fallback
+        try:
+            from pyvirtualcam import _native_windows_unity_capture  # noqa: F401
+            log.debug("pyvirtualcam Unity Capture backend importable.")
+            return DependencyStatus(
+                name="unity_capture",
+                installed=True,
+                path="Unity Capture (pyvirtualcam)",
             )
-            log.info("Unity Capture check: not installed. %s", msg)
-            return DependencyStatus(name="unity_capture", installed=False, error=msg)
-        except OSError as exc:
-            msg = f"Registry query for Unity Capture CLSID failed: {exc}"
-            log.warning(msg)
-            return DependencyStatus(name="unity_capture", installed=False, error=msg)
+        except (ImportError, OSError):
+            pass
+
+        try:
+            from pyvirtualcam import _native_windows_obs  # noqa: F401
+            log.debug("pyvirtualcam OBS backend importable.")
+            return DependencyStatus(
+                name="unity_capture",
+                installed=True,
+                path="OBS Virtual Camera (pyvirtualcam)",
+            )
+        except (ImportError, OSError):
+            pass
+
+        msg = (
+            "No virtual camera driver found. "
+            "Install Unity Capture (bundled) or OBS Studio."
+        )
+        log.info("Virtual camera check: not installed. %s", msg)
+        return DependencyStatus(name="unity_capture", installed=False, error=msg)
 
     def install_unity_capture(self) -> DependencyStatus:
         """
         Register the Unity Capture DirectShow filter via regsvr32.
 
-        Locates the DLL under ``<app_dir>/UnityCapture/`` (64-bit preferred,
-        32-bit fallback) and invokes ``regsvr32 /s <dll>`` with UAC elevation
-        via ``ShellExecuteW("runas",...)``.
+        First checks if any virtual camera backend is already available
+        (Unity Capture or OBS Virtual Camera). If so, returns success
+        immediately without attempting registration.
+
+        Otherwise, locates the DLL under ``<app_dir>/UnityCapture/`` (64-bit
+        preferred, 32-bit fallback) and invokes ``regsvr32 /s <dll>`` with
+        UAC elevation via ``ShellExecuteW("runas",...)``.
 
         After launching the elevated process, polls the registry for up to
         ``UNITY_INSTALL_POLL_TIMEOUT`` seconds to confirm the CLSID appears.
@@ -361,6 +406,12 @@ class DependencyChecker:
             an error message describing the failure (DLL not found, UAC denied,
             registration timed out, etc.).
         """
+        # Pre-check: if already installed, skip registration entirely
+        existing = self.check_unity_capture()
+        if existing.installed:
+            log.info("Virtual camera driver already registered, skipping install.")
+            return existing
+
         dll_path = self._locate_unity_capture_dll()
         if dll_path is None:
             searched = [

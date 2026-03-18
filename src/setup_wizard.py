@@ -590,20 +590,25 @@ class SetupWizard(QWidget):
             card.set_progress(downloaded, total)
 
     def _update_continue_button(self):
-        """Enable Continue if all steps are complete or skipped."""
+        """Enable Continue if all steps are resolved (complete, skipped, or errored).
+
+        Errored steps count as resolved since the user can see the error and
+        choose to continue anyway or retry. Only PENDING and IN_PROGRESS
+        steps block the Continue button.
+        """
         all_resolved = all(
-            card.state in (StepState.COMPLETE, StepState.SKIPPED)
+            card.state in (StepState.COMPLETE, StepState.SKIPPED, StepState.ERROR)
             for card in self._step_cards.values()
         )
         self._continue_btn.setEnabled(all_resolved)
 
     def _on_skip_all(self):
-        """Mark all pending steps as skipped and enable Continue."""
+        """Mark all unresolved steps as skipped and enable Continue."""
         for step_id, card in self._step_cards.items():
-            if card.state == StepState.PENDING:
+            if card.state in (StepState.PENDING, StepState.IN_PROGRESS, StepState.ERROR):
                 card.set_state(StepState.SKIPPED)
                 log.warning("[EVENT:setup] %s skipped by user", step_id)
-        self._update_continue_button()
+        self._continue_btn.setEnabled(True)
         self.setup_skipped.emit()
 
     def _on_continue(self):
@@ -612,9 +617,20 @@ class SetupWizard(QWidget):
         ffmpeg_result = self._results.get("ffmpeg")
         if ffmpeg_result and ffmpeg_result.installed and ffmpeg_result.path:
             result_dict["ffmpeg_path"] = ffmpeg_result.path
+
+        # Log what was installed vs skipped vs errored
+        for step_id, card in self._step_cards.items():
+            log.info("[EVENT:setup] %s: %s", step_id, card.state)
+
         log.info("[EVENT:setup] Setup wizard complete, proceeding to dashboard")
         self.setup_complete.emit(result_dict)
         self.close()
+
+    def closeEvent(self, event):
+        """Handle window close (X button) — treat as skip all + continue."""
+        log.info("[EVENT:setup] Setup wizard closed by user")
+        self.setup_complete.emit({})
+        event.accept()
 
 
 def run_setup_wizard(checker) -> Optional[dict]:
@@ -624,12 +640,15 @@ def run_setup_wizard(checker) -> Optional[dict]:
     Creates a QApplication if one doesn't exist, shows the wizard,
     and blocks until the user clicks Continue or closes the window.
 
+    Always returns a dict (possibly empty) so the caller can proceed.
+    The wizard is designed to never block the app from launching.
+
     Args:
         checker: DependencyChecker instance.
 
     Returns:
-        dict with setup results (e.g., ffmpeg_path), or None if
-        the wizard was closed without completing.
+        dict with setup results (e.g., ffmpeg_path). Always returns
+        a dict, never None — the app should always proceed.
     """
     app = QApplication.instance()
     created_app = False
@@ -644,9 +663,13 @@ def run_setup_wizard(checker) -> Optional[dict]:
     def on_complete(data):
         result["completed"] = True
         result["data"] = data
+        if created_app:
+            app.quit()
 
     def on_skipped():
         result["completed"] = True
+        if created_app:
+            app.quit()
 
     wizard.setup_complete.connect(on_complete)
     wizard.setup_skipped.connect(on_skipped)
@@ -655,13 +678,10 @@ def run_setup_wizard(checker) -> Optional[dict]:
     if created_app:
         app.exec()
     else:
-        # If app already exists, run a local event loop
         from PyQt6.QtCore import QEventLoop
         loop = QEventLoop()
-        wizard.destroyed.connect(loop.quit)
         wizard.setup_complete.connect(loop.quit)
+        wizard.setup_skipped.connect(loop.quit)
         loop.exec()
 
-    if result["completed"]:
-        return result["data"]
-    return None
+    return result.get("data", {})
