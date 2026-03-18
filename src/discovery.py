@@ -1,17 +1,28 @@
 """
 discovery.py — USB device enumeration and GoPro network discovery
 
-Detects a connected GoPro Hero 12 by USB vendor/product ID, then finds
+Detects a connected GoPro by USB vendor/product ID, then finds
 the corresponding NCM network interface and resolves the camera's IP.
 
+IP address formula (Open GoPro spec):
+  The camera's USB IP is 172.2X.1YZ.51 where XYZ are the last three
+  digits of the camera's serial number.  Example: serial ending "212"
+  → 172.22.112.51.  The host must be on the same /24 subnet (e.g.
+  172.22.112.50) for communication to work.
+
 Discovery fallback chain (discover_gopro_ip_chain):
-  1. USB interface scan (ipconfig + psutil) — fastest, most reliable
+  0. Serial-number lookup — instant, most reliable (Hero 9+)
+  1. USB interface scan (ipconfig + psutil) — for cameras with working DHCP
   2. IP range scan (brute-force 172.2x.1xx.51) — works without adapter name
   3. mDNS (_gopro-web._tcp.local.) — works even with unusual IP ranges
 
+When DHCP fails (common on some models), the NCM adapter falls back to a
+169.254.x.x APIPA address.  In that case, we auto-configure a static
+IP on the correct 172.x subnet so the camera becomes reachable.
+
 GoPro USB identifiers:
-  Vendor ID:  0x0A70 (2672 decimal) — GoPro, Inc.
-  Known PIDs: 0x000D (Hero 12 Black USB Ethernet/RNDIS)
+  Vendor ID: 0x2672 (GoPro, Inc. — all models)
+  PIDs vary by model and firmware (see GOPRO_KNOWN_PIDS)
 
 When the GoPro connects over USB, Windows creates a virtual network
 adapter using NCM (Network Control Model). The camera's HTTP API is
@@ -33,18 +44,29 @@ from logger import get_logger
 log = get_logger(__name__)
 
 # --- GoPro USB identifiers ---
-# GoPro has used multiple vendor IDs across product generations:
-#   0x2672 — Hero 12 and newer (decimal 9842)
-#   0x0A70 — Older GoPro models (decimal 2672)
-GOPRO_VENDOR_ID = 0x2672   # Current GoPro VID (Hero 12+)
-GOPRO_VENDOR_IDS = {0x2672, 0x0A70}  # All known GoPro VIDs
+# All GoPro cameras use vendor ID 0x2672 (GoPro, Inc.)
+# Source: USB ID Database (usb-ids.gowdy.us, devicehunt.com)
+GOPRO_VENDOR_ID = 0x2672
+GOPRO_VENDOR_IDS = {0x2672}
 
-# Known GoPro USB product IDs (Hero 12 uses NCM/RNDIS mode)
-# Multiple PIDs are possible depending on firmware and USB mode
+# Known GoPro USB product IDs across all models.
+# Multiple PIDs are possible depending on model, firmware, and USB mode.
+# The discovery logic matches on vendor ID first, then uses PID as a hint.
+# Unknown PIDs under vendor 0x2672 are still treated as potential GoPro devices.
 GOPRO_KNOWN_PIDS = {
-    0x0059,  # Hero 12 webcam/USB mode
-    0x000D,  # Hero 12 RNDIS Ethernet gadget
-    0x0011,  # Alternate NCM mode
+    # Hero 3 / 3+
+    0x0004,  # Hero 3
+    0x0006,  # Hero 3+ Silver
+    0x0007,  # Hero 3+ Black
+    0x0011,  # Hero 3+ Black (alternate)
+    # Hero 4
+    0x000E,  # Hero 4 Black
+    # Hero 8+
+    0x0049,  # Hero 8 Black
+    0x0052,  # Hero 9 Black
+    # Hero 9+ (NCM/RNDIS webcam mode)
+    0x0059,  # Webcam/USB mode (Hero 9+)
+    0x000D,  # RNDIS Ethernet gadget
     0x0043,  # Alternate USB config
 }
 
@@ -75,6 +97,7 @@ MDNS_ADDR = "224.0.0.251"
 
 class DiscoveryMethod(Enum):
     """Identifies which discovery method found the camera's IP."""
+    SERIAL = "serial"      # Computed from serial number (fastest, most reliable)
     USB_SCAN = "usb_scan"
     IP_SCAN = "ip_scan"
     MDNS = "mdns"
@@ -86,6 +109,7 @@ class GoProDevice:
     vendor_id: int
     product_id: int
     description: str
+    serial_number: Optional[str] = None
     interface_name: Optional[str] = None
     camera_ip: Optional[str] = None
     host_ip: Optional[str] = None
@@ -112,7 +136,7 @@ def enumerate_usb_gopro_devices() -> list[GoProDevice]:
     """Enumerate USB devices and return any with GoPro's vendor ID.
 
     Uses Windows Setup API (setupapi.dll) via ctypes to scan the USB bus
-    for devices matching GoPro's vendor ID (0x0A70). This is the most
+    for devices matching GoPro's vendor ID (0x2672). This is the most
     reliable detection method -- it works even before network interfaces
     come up.
 
@@ -144,7 +168,7 @@ def _enumerate_via_wmi() -> list[GoProDevice]:
     """Use PowerShell/WMI to find GoPro USB devices.
 
     Queries Win32_PnPEntity for devices whose DeviceID contains
-    GoPro's vendor ID string 'VID_0A70'. This catches the camera
+    GoPro's vendor ID string 'VID_2672'. This catches the camera
     regardless of which USB mode or product ID it's using.
     """
     # Build a filter that matches ANY known GoPro VID
@@ -180,17 +204,30 @@ def _enumerate_via_wmi() -> list[GoProDevice]:
         data = [data]
 
     devices = []
+    serial = None
     for entry in data:
         device_id = entry.get("DeviceID", "")
         name = entry.get("Name", "") or entry.get("Description", "Unknown GoPro")
 
         vid, pid = _parse_vid_pid(device_id)
         if vid in GOPRO_VENDOR_IDS:
+            # Extract serial from the USB composite device entry.
+            # DeviceID format: USB\VID_xxxx&PID_xxxx\C3531350067212
+            # The serial is the part after the last backslash, but only
+            # on the composite device entry (no &MI_ in the ID).
+            entry_serial = _extract_serial_from_device_id(device_id)
+            if entry_serial:
+                serial = entry_serial
             devices.append(GoProDevice(
                 vendor_id=vid,
                 product_id=pid,
                 description=name,
             ))
+
+    # Attach the serial to all devices (they're the same physical camera)
+    if serial:
+        for d in devices:
+            d.serial_number = serial
 
     return devices
 
@@ -214,14 +251,18 @@ def _enumerate_via_pnputil() -> list[GoProDevice]:
         return []
 
     devices = []
+    serial = None
     current_instance_id = ""
     current_name = ""
 
     def _check_and_add():
-        nonlocal current_instance_id, current_name
+        nonlocal current_instance_id, current_name, serial
         if current_instance_id and any(v in current_instance_id.lower() for v in vid_strs):
             vid, pid = _parse_vid_pid(current_instance_id)
             if vid in GOPRO_VENDOR_IDS:
+                entry_serial = _extract_serial_from_device_id(current_instance_id)
+                if entry_serial:
+                    serial = entry_serial
                 devices.append(GoProDevice(
                     vendor_id=vid,
                     product_id=pid,
@@ -240,13 +281,17 @@ def _enumerate_via_pnputil() -> list[GoProDevice]:
 
     _check_and_add()  # Handle last entry
 
+    if serial:
+        for d in devices:
+            d.serial_number = serial
+
     return devices
 
 
 def _parse_vid_pid(device_id: str) -> tuple[int, int]:
     """Extract vendor ID and product ID from a USB device ID string.
 
-    Device IDs look like: USB\\VID_0A70&PID_000D\\...
+    Device IDs look like: USB\\VID_2672&PID_0059\\...
     Returns (vendor_id, product_id) as integers, or (0, 0) on failure.
     """
     vid_match = re.search(r"VID_([0-9A-Fa-f]{4})", device_id, re.IGNORECASE)
@@ -255,6 +300,232 @@ def _parse_vid_pid(device_id: str) -> tuple[int, int]:
     vid = int(vid_match.group(1), 16) if vid_match else 0
     pid = int(pid_match.group(1), 16) if pid_match else 0
     return vid, pid
+
+
+def _extract_serial_from_device_id(device_id: str) -> Optional[str]:
+    """Extract serial number from a USB DeviceID string.
+
+    The USB composite device entry has the format:
+        USB\\VID_2672&PID_0059\\C3531350067212
+    The serial is the last segment, but only on entries that do NOT contain
+    '&MI_' (which indicates a child interface, not the composite device).
+    """
+    if "&MI_" in device_id.upper():
+        return None
+    parts = device_id.replace("\\\\", "\\").split("\\")
+    if len(parts) >= 3:
+        candidate = parts[-1]
+        # Serial numbers are alphanumeric, typically 10+ chars
+        if len(candidate) >= 8 and candidate.isalnum():
+            return candidate
+    return None
+
+
+def compute_ip_from_serial(serial: str) -> Optional[str]:
+    """Compute the GoPro's USB IP address from its serial number.
+
+    Open GoPro spec: the USB IP is 172.2X.1YZ.51 where XYZ are the
+    last three digits of the serial number.
+
+    Example: serial "C3531350067212" → last 3 digits "212"
+             → 172.22.112.51
+
+    Works for all GoPro models that use the Open GoPro USB protocol
+    (Hero 9 and newer with Open GoPro firmware).
+    """
+    if not serial or len(serial) < 3:
+        return None
+    last3 = serial[-3:]
+    if not last3.isdigit():
+        return None
+    x, y, z = last3[0], last3[1], last3[2]
+    return f"172.2{x}.1{y}{z}.51"
+
+
+def _find_ncm_adapter() -> Optional[tuple[str, str]]:
+    """Find the GoPro NCM network adapter and its current IP.
+
+    Scans ipconfig /all for adapters whose description contains
+    'UsbNcm', 'NCM', 'RNDIS', 'Remote NDIS', or 'GoPro'.
+
+    Returns:
+        Tuple of (adapter_name, current_ip) or None if not found.
+        The IP may be a 169.254.x.x APIPA address if DHCP failed.
+        Returns None if no NCM-like adapter exists (camera not connected).
+    """
+    try:
+        result = subprocess.run(
+            ["ipconfig", "/all"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    except Exception as e:
+        log.debug("ipconfig /all failed: %s", e)
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    ncm_patterns = [
+        re.compile(r"usbncm", re.IGNORECASE),
+        re.compile(r"remote ndis", re.IGNORECASE),
+        re.compile(r"rndis", re.IGNORECASE),
+        re.compile(r"gopro", re.IGNORECASE),
+    ]
+
+    lines = result.stdout.splitlines()
+    current_adapter_raw = None
+    current_is_ncm = False
+    current_ip = None
+
+    def _emit():
+        """Return (adapter_name, ip) if current adapter is NCM with an IP."""
+        if current_is_ncm and current_adapter_raw and current_ip:
+            # Strip prefix like "Ethernet adapter " to get just the name
+            name = re.sub(
+                r"^.*?adapter\s+", "", current_adapter_raw, flags=re.IGNORECASE
+            ).strip()
+            return name, current_ip
+        return None
+
+    for line in lines:
+        # Adapter header lines look like:
+        #   "Ethernet adapter Ethernet 2:"
+        #   "Wireless LAN adapter Wi-Fi:"
+        # They start at column 0 (no leading spaces) and end with ":"
+        if line and not line[0].isspace() and line.rstrip().endswith(":"):
+            result_pair = _emit()
+            if result_pair:
+                return result_pair
+            current_adapter_raw = line.rstrip().rstrip(":")
+            current_is_ncm = False
+            current_ip = None
+            continue
+
+        stripped = line.strip()
+
+        # Check description line for NCM-like patterns
+        if "description" in stripped.lower():
+            if any(p.search(stripped) for p in ncm_patterns):
+                current_is_ncm = True
+
+        # Grab IPv4 address (works for both DHCP and Autoconfiguration lines)
+        if current_is_ncm:
+            ipv4_match = re.search(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", stripped)
+            if ipv4_match and any(
+                kw in stripped.lower()
+                for kw in ("ipv4", "ip address", "autoconfiguration ipv4")
+            ):
+                current_ip = ipv4_match.group(1)
+
+    # Check last adapter
+    result_pair = _emit()
+    if result_pair:
+        return result_pair
+
+    return None
+
+
+def _configure_ncm_adapter(adapter_name: str, camera_ip: str) -> bool:
+    """Set a static IP on the NCM adapter so the GoPro is reachable.
+
+    When DHCP fails (common on some models), the adapter gets a 169.254.x.x
+    APIPA address. We assign a static IP on the same /24 subnet as the
+    camera (e.g. camera at 172.22.112.51 → host at 172.22.112.50).
+
+    Requires administrator privileges. Returns False if elevation fails
+    (the caller should fall back to other discovery methods or prompt
+    the user).
+    """
+    parts = camera_ip.split(".")
+    host_ip = f"{parts[0]}.{parts[1]}.{parts[2]}.50"
+    subnet = "255.255.255.0"
+
+    log.info(
+        "[EVENT:discovery_start] Configuring NCM adapter '%s' with static IP %s "
+        "(camera expected at %s)",
+        adapter_name, host_ip, camera_ip,
+    )
+
+    try:
+        result = subprocess.run(
+            ["netsh", "interface", "ipv4", "set", "address",
+             f"name={adapter_name}", "static", host_ip, subnet],
+            capture_output=True, text=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        if result.returncode == 0:
+            log.info("[EVENT:discovery_found] NCM adapter configured: %s → %s", adapter_name, host_ip)
+            # Give the adapter a moment to apply the new config
+            time.sleep(1.0)
+            return True
+        else:
+            stderr = result.stdout.strip() or result.stderr.strip()
+            if "elevation" in stderr.lower() or "administrator" in stderr.lower():
+                log.warning(
+                    "[EVENT:discovery_failed] NCM adapter config needs admin privileges. "
+                    "Run GoPro Bridge as administrator for automatic network setup."
+                )
+            else:
+                log.warning("[EVENT:discovery_failed] netsh failed: %s", stderr)
+            return False
+    except Exception as e:
+        log.warning("[EVENT:discovery_failed] NCM adapter config error: %s", e)
+        return False
+
+
+def _discover_via_serial(serial: str, probe_timeout: float = 2.0) -> Optional[str]:
+    """Discover GoPro IP using serial number + NCM adapter configuration.
+
+    This is the fastest and most reliable discovery method:
+      1. Compute the camera IP from the serial number
+      2. Check if the NCM adapter is already on the right subnet
+      3. If not (APIPA/wrong subnet), configure it automatically
+      4. Probe the computed IP to confirm the camera is there
+
+    Returns the camera IP on success, None on failure.
+    """
+    camera_ip = compute_ip_from_serial(serial)
+    if not camera_ip:
+        log.debug("[EVENT:discovery_failed] Could not compute IP from serial '%s'", serial)
+        return None
+
+    log.info("[EVENT:discovery_start] Serial %s → computed IP %s", serial, camera_ip)
+
+    # First, try probing directly — maybe DHCP worked and we're already on the right subnet
+    if _probe_gopro_http(camera_ip, timeout=probe_timeout):
+        log.info("[EVENT:discovery_found] GoPro reachable at computed IP %s (DHCP worked)", camera_ip)
+        return camera_ip
+
+    # DHCP likely failed — find the NCM adapter and configure it
+    ncm_info = _find_ncm_adapter()
+    if not ncm_info:
+        log.debug("[EVENT:discovery_failed] No NCM adapter found for static IP config")
+        return None
+
+    adapter_name, current_ip = ncm_info
+    log.info("[EVENT:discovery_start] NCM adapter '%s' has IP %s", adapter_name, current_ip)
+
+    # Check if adapter is already on the right subnet
+    camera_parts = camera_ip.split(".")
+    current_parts = current_ip.split(".")
+    if current_parts[:3] == camera_parts[:3]:
+        # Same subnet — adapter is configured, but camera didn't respond
+        log.debug("[EVENT:discovery_failed] Adapter already on correct subnet but camera not responding")
+        return None
+
+    # Configure the adapter
+    if _configure_ncm_adapter(adapter_name, camera_ip):
+        # Retry probe after configuration
+        if _probe_gopro_http(camera_ip, timeout=probe_timeout):
+            log.info("[EVENT:discovery_found] GoPro reachable at %s after adapter config", camera_ip)
+            return camera_ip
+        else:
+            log.warning("[EVENT:discovery_failed] GoPro not responding at %s even after adapter config", camera_ip)
+            return None
+    else:
+        log.debug("[EVENT:discovery_failed] Could not configure NCM adapter")
+        return None
 
 
 # ============================================================================
@@ -881,22 +1152,23 @@ def discover_gopro_ip_chain(
     probe_timeout: float = 2.0,
     mdns_timeout: float = 3.0,
     ip_scan_max_workers: int = IP_RANGE_SCAN_MAX_WORKERS,
+    serial: Optional[str] = None,
 ) -> tuple[Optional[str], Optional[DiscoveryMethod]]:
     """Fallback chain orchestrator: tries discovery methods in sequence.
 
-    Attempts to find the GoPro's IP address using three methods, returning
-    as soon as one succeeds:
+    Attempts to find the GoPro's IP address using up to four methods,
+    returning as soon as one succeeds:
 
-      1. **USB scan** (fastest, most reliable): Parse network interfaces
-         (ipconfig, psutil) looking for the GoPro NCM adapter by name.
+      0. **Serial lookup** (instant): Compute IP from camera serial number.
+         Also auto-configures the NCM adapter if DHCP failed.
+
+      1. **USB scan** (fast): Parse network interfaces (ipconfig, psutil)
+         looking for the GoPro NCM adapter by name.
 
       2. **IP scan** (medium speed): Probe all IPs in the known GoPro
-         172.2x.1xx.51 range on port 8080 concurrently. Works even when
-         the adapter has a generic name that ipconfig parsing misses.
+         172.2x.1xx.51 range on port 8080 concurrently.
 
       3. **mDNS** (slowest, last resort): Query for _gopro-web._tcp.local.
-         mDNS service announcements. Works even when the IP is outside
-         the common range.
 
     Each method is wrapped in a try/except so a failure in one method
     never prevents the next method from being attempted.
@@ -905,12 +1177,29 @@ def discover_gopro_ip_chain(
         probe_timeout: TCP connect timeout per IP for IP range scan.
         mdns_timeout: How long to listen for mDNS responses.
         ip_scan_max_workers: Thread pool size for IP range scan.
+        serial: Camera serial number (from USB enumeration) for IP computation.
 
     Returns:
         Tuple of (camera_ip, discovery_method) on success,
         or (None, None) if all methods fail.
     """
     log.info("[EVENT:discovery_start] Starting IP discovery fallback chain...")
+
+    # --- Method 0: Serial-number-based IP computation ---
+    if serial:
+        log.info("[EVENT:discovery_start] Chain step 0: serial-based lookup (serial=%s)", serial)
+        try:
+            ip = _discover_via_serial(serial, probe_timeout=probe_timeout)
+            if ip:
+                log.info("[EVENT:discovery_found] Chain: serial lookup found GoPro at %s", ip)
+                return ip, DiscoveryMethod.SERIAL
+        except Exception as e:
+            log.warning(
+                "[EVENT:discovery_failed] Chain: serial lookup raised exception: %s", e
+            )
+        log.info("[EVENT:discovery_failed] Chain step 0: serial lookup found nothing")
+    else:
+        log.debug("[EVENT:discovery_start] Chain step 0: skipped (no serial available)")
 
     # --- Method 1: USB interface scan (ipconfig + psutil) ---
     log.info("[EVENT:discovery_start] Chain step 1/3: USB interface scan")
@@ -956,7 +1245,7 @@ def discover_gopro_ip_chain(
         )
 
     log.info(
-        "[EVENT:discovery_failed] Chain: all 3 methods exhausted -- no GoPro IP found"
+        "[EVENT:discovery_failed] Chain: all methods exhausted -- no GoPro IP found"
     )
     return None, None
 
@@ -1081,7 +1370,15 @@ def timed_full_discovery(
             attempt, remaining,
         )
 
-        camera_ip = discover_gopro_ip()
+        # Try serial-based discovery first (handles DHCP failure + adapter config)
+        camera_ip = None
+        if device.serial_number:
+            camera_ip = _discover_via_serial(device.serial_number, probe_timeout=probe_timeout)
+
+        # Fall back to traditional USB scan
+        if not camera_ip:
+            camera_ip = discover_gopro_ip()
+
         if camera_ip:
             device.camera_ip = camera_ip
             elapsed = time.monotonic() - start_time
@@ -1155,14 +1452,22 @@ def full_discovery(timeout: float = 5.0) -> Optional[GoProDevice]:
             return device
         return None
 
+    # Collect serial number from any device that has one
+    serial = None
+    for d in usb_devices:
+        if d.serial_number:
+            serial = d.serial_number
+            break
+
     log.info(
-        "[EVENT:discovery_start] Found %d GoPro USB device(s): %s",
+        "[EVENT:discovery_start] Found %d GoPro USB device(s): %s (serial=%s)",
         len(usb_devices),
         [d.usb_id_str for d in usb_devices],
+        serial or "unknown",
     )
 
     # Step 2: Find the camera's IP using the fallback chain
-    camera_ip, method = discover_gopro_ip_chain(probe_timeout=timeout)
+    camera_ip, method = discover_gopro_ip_chain(probe_timeout=timeout, serial=serial)
 
     if camera_ip:
         device = usb_devices[0]
@@ -1193,7 +1498,7 @@ if __name__ == "__main__":
 
     print("=== GoPro USB Device Enumeration ===\n")
 
-    print("Scanning USB bus for GoPro devices (VID 0A70)...")
+    print("Scanning USB bus for GoPro devices (VID 2672)...")
     devices = enumerate_usb_gopro_devices()
 
     if devices:

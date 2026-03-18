@@ -138,7 +138,7 @@ class TestRetryButtonState:
         """Button is enabled when show_retry() is called."""
         retry_button.show_retry()
         assert retry_button._button.isEnabled()
-        assert retry_button._button.text() == "🔄  Retry Discovery"
+        assert retry_button._button.text() == "Retry Discovery"
 
     def test_set_retrying_disables_button(self, retry_button):
         """set_retrying() disables the button and changes text."""
@@ -155,7 +155,7 @@ class TestRetryButtonState:
 
         retry_button.show_retry()
         assert retry_button._button.isEnabled()
-        assert retry_button._button.text() == "🔄  Retry Discovery"
+        assert retry_button._button.text() == "Retry Discovery"
 
 
 class TestRetryButtonClick:

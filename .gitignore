@@ -27,3 +27,12 @@ logs/
 
 # Config (user-specific)
 config.json
+
+# Release artifacts
+*.zip
+
+# Claude Code prompt files
+GoProBridge_ClaudeCode_Prompt.md
+
+# Design docs (internal)
+docs/superpowers/

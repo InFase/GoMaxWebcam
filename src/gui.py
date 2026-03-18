@@ -32,10 +32,12 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSizePolicy,
     QSpinBox,
+    QSystemTrayIcon,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -57,6 +59,8 @@ STATE_COLORS = {
     AppState.DISCOVERING: "#2196F3",       # Blue
     AppState.CONNECTING: "#FF9800",        # Orange
     AppState.STREAMING: "#4CAF50",         # Green
+    AppState.PAUSED: "#FF9800",            # Orange
+    AppState.CHARGE_MODE: "#9C27B0",       # Purple
     AppState.RECONNECTING: "#FF9800",      # Orange
     AppState.DISCONNECTED: "#F44336",      # Red
     AppState.ERROR: "#F44336",             # Red
@@ -69,6 +73,8 @@ STATE_LABELS = {
     AppState.DISCOVERING: "Searching for GoPro…",
     AppState.CONNECTING: "Connecting…",
     AppState.STREAMING: "Streaming",
+    AppState.PAUSED: "Paused",
+    AppState.CHARGE_MODE: "Charging",
     AppState.RECONNECTING: "Reconnecting…",
     AppState.DISCONNECTED: "Disconnected",
     AppState.ERROR: "Error",
@@ -111,10 +117,10 @@ class RetryButton(QWidget):
         )
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._label.setWordWrap(True)
-        self._label.setStyleSheet("color: #B0B0B0; font-size: 12px;")
+        self._label.setStyleSheet("color: #9E9E9E; font-size: 12px;")
 
         # The retry button itself
-        self._button = QPushButton("🔄  Retry Discovery")
+        self._button = QPushButton("Retry Discovery")
         self._button.setMinimumHeight(44)
         self._button.setCursor(Qt.CursorShape.PointingHandCursor)
         self._button.setStyleSheet("""
@@ -122,7 +128,7 @@ class RetryButton(QWidget):
                 background-color: #2196F3;
                 color: white;
                 border: none;
-                border-radius: 6px;
+                border-radius: 8px;
                 font-size: 14px;
                 font-weight: bold;
                 padding: 10px 24px;
@@ -134,8 +140,8 @@ class RetryButton(QWidget):
                 background-color: #1565C0;
             }
             QPushButton:disabled {
-                background-color: #555555;
-                color: #999999;
+                background-color: #1e2d4a;
+                color: #445566;
             }
         """)
         self._button.clicked.connect(self._on_click)
@@ -159,7 +165,7 @@ class RetryButton(QWidget):
         if message:
             self._label.setText(message)
         self._button.setEnabled(True)
-        self._button.setText("🔄  Retry Discovery")
+        self._button.setText("Retry Discovery")
         self.setVisible(True)
 
     def hide_retry(self):
@@ -179,7 +185,7 @@ class RetryButton(QWidget):
 MANUAL_MODE_STEPS = [
     ("Power cycle the GoPro", "Turn the camera OFF, wait 5 seconds, then turn it back ON."),
     ("Check the USB-C cable", "Ensure the cable is firmly connected at both ends. Try a different USB-C port if available."),
-    ("Check USB Preferences", 'On the GoPro: swipe down → Preferences → Connections → USB Connection. If the option exists, select "GoPro Connect". (Hero 13+ may not have this setting — that\'s OK, skip this step.)'),
+    ("Check USB Preferences", 'On the GoPro: swipe down \u2192 Preferences \u2192 Connections \u2192 USB Connection. If the option exists, select "GoPro Connect". (Some models may not have this setting \u2014 that\'s OK, skip this step.)'),
     ("Wait for USB Connected", 'The GoPro screen should display "USB Connected" or show the webcam icon once the link is established.'),
     ("Click Retry below", "Once the camera shows USB Connected, click Retry to let GoPro Bridge reconnect."),
 ]
@@ -232,7 +238,7 @@ class ManualModeGuide(QWidget):
         """)
         self._collapse_btn.clicked.connect(self._toggle_collapse)
 
-        self._header_label = QLabel("⚠  Manual Setup Required")
+        self._header_label = QLabel("Manual Setup Required")
         self._header_label.setStyleSheet(
             "color: #FFB74D; font-size: 13px; font-weight: bold;"
         )
@@ -268,9 +274,9 @@ class ManualModeGuide(QWidget):
         # ── Outer styling ──
         self.setStyleSheet("""
             ManualModeGuide {
-                background-color: #2A2418;
-                border: 1px solid #5C4A2A;
-                border-radius: 6px;
+                background-color: #1e2818;
+                border: 1px solid #3a4a2a;
+                border-radius: 8px;
             }
         """)
 
@@ -362,7 +368,7 @@ class ManualModeGuide(QWidget):
 # ── SettingsPanel widget ──────────────────────────────────────────────────
 
 # Resolution options: code → display label
-# Hero 13 uses code 12 for 1080p (not 4K). Code 4 doesn't exist on Hero 13.
+# Resolution codes vary by GoPro model. The app auto-remaps if a code is rejected.
 # We show the options the camera actually supports.
 _RESOLUTION_OPTIONS = [
     (7,  "720p"),
@@ -521,20 +527,20 @@ class SettingsPanel(QWidget):
         layout.addWidget(self._restart_note)
 
         self._save_btn = QPushButton("Save Settings")
-        self._save_btn.setMinimumHeight(36)
+        self._save_btn.setMinimumHeight(38)
         self._save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._save_btn.setEnabled(False)
         self._save_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2196F3; color: white;
-                border: none; border-radius: 4px;
+                border: none; border-radius: 6px;
                 font-size: 13px; font-weight: bold;
                 padding: 8px 20px;
             }
             QPushButton:hover { background-color: #1976D2; }
             QPushButton:pressed { background-color: #1565C0; }
             QPushButton:disabled {
-                background-color: #3A3A3A; color: #666666;
+                background-color: #1e2d4a; color: #445566;
             }
         """)
         self._save_btn.clicked.connect(self._on_save_clicked)
@@ -544,12 +550,12 @@ class SettingsPanel(QWidget):
         self._dirty = False
         self._needs_restart = False
 
-        # Outer styling
+        # Outer styling — match main window theme
         self.setStyleSheet("""
             SettingsPanel {
-                background-color: #252525;
-                border: 1px solid #3D3D3D;
-                border-radius: 6px;
+                background-color: #16213e;
+                border: 1px solid #1e2d4a;
+                border-radius: 8px;
             }
         """)
 
@@ -558,7 +564,7 @@ class SettingsPanel(QWidget):
     def _section_label(self, text: str) -> QLabel:
         lbl = QLabel(text.upper())
         lbl.setStyleSheet(
-            "color: #707070; font-size: 10px; font-weight: bold; "
+            "color: #556677; font-size: 10px; font-weight: bold; "
             "letter-spacing: 1px; padding-bottom: 2px;"
         )
         return lbl
@@ -566,32 +572,33 @@ class SettingsPanel(QWidget):
     def _field_label(self, text: str) -> QLabel:
         lbl = QLabel(text)
         lbl.setFixedWidth(110)
-        lbl.setStyleSheet("color: #B0B0B0; font-size: 12px;")
+        lbl.setStyleSheet("color: #9E9E9E; font-size: 12px;")
         return lbl
 
     def _style_combo(self, combo: QComboBox):
         combo.setStyleSheet("""
             QComboBox {
-                background-color: #333333; color: #E0E0E0;
-                border: 1px solid #555555; border-radius: 3px;
-                padding: 4px 8px; font-size: 12px;
+                background-color: #0d1526; color: #E0E0E0;
+                border: 1px solid #1e2d4a; border-radius: 4px;
+                padding: 5px 10px; font-size: 12px;
             }
             QComboBox:hover { border-color: #2196F3; }
             QComboBox::drop-down {
                 border: none; width: 20px;
             }
             QComboBox QAbstractItemView {
-                background-color: #333333; color: #E0E0E0;
+                background-color: #16213e; color: #E0E0E0;
                 selection-background-color: #2196F3;
+                border: 1px solid #1e2d4a;
             }
         """)
 
     def _style_spin(self, spin: QSpinBox):
         spin.setStyleSheet("""
             QSpinBox {
-                background-color: #333333; color: #E0E0E0;
-                border: 1px solid #555555; border-radius: 3px;
-                padding: 4px 8px; font-size: 12px;
+                background-color: #0d1526; color: #E0E0E0;
+                border: 1px solid #1e2d4a; border-radius: 4px;
+                padding: 5px 10px; font-size: 12px;
             }
             QSpinBox:hover { border-color: #2196F3; }
         """)
@@ -599,9 +606,9 @@ class SettingsPanel(QWidget):
     def _style_line_edit(self, edit: QLineEdit):
         edit.setStyleSheet("""
             QLineEdit {
-                background-color: #333333; color: #E0E0E0;
-                border: 1px solid #555555; border-radius: 3px;
-                padding: 4px 8px; font-size: 12px;
+                background-color: #0d1526; color: #E0E0E0;
+                border: 1px solid #1e2d4a; border-radius: 4px;
+                padding: 5px 10px; font-size: 12px;
             }
             QLineEdit:hover { border-color: #2196F3; }
             QLineEdit:focus { border-color: #2196F3; }
@@ -609,10 +616,10 @@ class SettingsPanel(QWidget):
 
     def _style_checkbox(self, cb: QCheckBox):
         cb.setStyleSheet("""
-            QCheckBox { color: #B0B0B0; font-size: 12px; spacing: 8px; }
+            QCheckBox { color: #9E9E9E; font-size: 12px; spacing: 8px; }
             QCheckBox::indicator {
-                width: 16px; height: 16px; border-radius: 3px;
-                border: 1px solid #555555; background-color: #333333;
+                width: 16px; height: 16px; border-radius: 4px;
+                border: 1px solid #1e2d4a; background-color: #0d1526;
             }
             QCheckBox::indicator:checked {
                 background-color: #2196F3; border-color: #2196F3;
@@ -794,67 +801,93 @@ class DashboardWindow(QMainWindow):
 
     def _build_ui(self):
         """Build the window layout."""
-        self.setWindowTitle("GoPro Bridge")
+        self.setWindowTitle("GoPro Bridge v1.0.0")
         self.setMinimumSize(480, 420)
         self.resize(540, 600)
 
-        # Dark theme
+        # Dark theme — deep navy-black matching setup wizard
         self.setStyleSheet("""
-            QMainWindow { background-color: #1E1E1E; }
+            QMainWindow { background-color: #1a1a2e; }
             QLabel { color: #E0E0E0; }
             QTextEdit {
-                background-color: #2D2D2D;
+                background-color: #16213e;
                 color: #D4D4D4;
-                border: 1px solid #3D3D3D;
-                border-radius: 4px;
-                font-family: 'Consolas', 'Courier New', monospace;
+                border: 1px solid #1e2d4a;
+                border-radius: 6px;
+                font-family: 'Consolas', 'Cascadia Code', 'Courier New', monospace;
                 font-size: 11px;
+                padding: 8px;
+                selection-background-color: #2196F3;
+            }
+            QScrollBar:vertical {
+                background: #16213e;
+                width: 8px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical {
+                background: #2a3a5c;
+                border-radius: 4px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #3a4a6c;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
             }
         """)
 
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
-        main_layout.setContentsMargins(16, 16, 16, 16)
-        main_layout.setSpacing(12)
+        main_layout.setContentsMargins(20, 20, 20, 16)
+        main_layout.setSpacing(14)
 
         # ── Header: state indicator ──
         header = QHBoxLayout()
+        header.setSpacing(10)
 
-        self._state_dot = QLabel("●")
-        self._state_dot.setFixedWidth(20)
-        self._state_dot.setStyleSheet("font-size: 16px; color: #888888;")
+        self._state_dot = QLabel("\u25CF")
+        self._state_dot.setFixedWidth(22)
+        self._state_dot.setStyleSheet("font-size: 18px; color: #888888;")
 
-        self._state_label = QLabel("Initializing…")
-        self._state_label.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        self._state_label = QLabel("Initializing...")
+        state_font = QFont("Segoe UI", 14, QFont.Weight.Bold)
+        self._state_label.setFont(state_font)
 
         header.addWidget(self._state_dot)
         header.addWidget(self._state_label)
         header.addStretch()
 
-        # Battery label (hidden until we get camera info)
+        # Info badges (battery + port) in a compact row
         self._battery_label = QLabel("")
-        self._battery_label.setStyleSheet("color: #A0A0A0; font-size: 12px;")
+        self._battery_label.setStyleSheet(
+            "color: #9E9E9E; font-size: 11px; background-color: #16213e; "
+            "border-radius: 4px; padding: 2px 8px; border: 1px solid #1e2d4a;"
+        )
         self._battery_label.setVisible(False)
         header.addWidget(self._battery_label)
 
-        # Active port label (read-only, hidden until port is selected)
         self._port_label = QLabel("")
-        self._port_label.setStyleSheet("color: #A0A0A0; font-size: 12px;")
+        self._port_label.setStyleSheet(
+            "color: #9E9E9E; font-size: 11px; background-color: #16213e; "
+            "border-radius: 4px; padding: 2px 8px; border: 1px solid #1e2d4a;"
+        )
         self._port_label.setVisible(False)
         header.addWidget(self._port_label)
 
         # Settings gear button
-        self._settings_btn = QPushButton("⚙")
-        self._settings_btn.setFixedSize(32, 32)
+        self._settings_btn = QPushButton("\u2699")
+        self._settings_btn.setFixedSize(34, 34)
         self._settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._settings_btn.setToolTip("Settings")
         self._settings_btn.setStyleSheet("""
             QPushButton {
-                background: transparent; color: #808080;
-                border: none; font-size: 18px;
+                background: transparent; color: #666666;
+                border: none; font-size: 20px;
+                border-radius: 17px;
             }
-            QPushButton:hover { color: #2196F3; }
+            QPushButton:hover { color: #2196F3; background-color: #16213e; }
         """)
         self._settings_btn.clicked.connect(self._on_settings_clicked)
         header.addWidget(self._settings_btn)
@@ -877,7 +910,7 @@ class DashboardWindow(QMainWindow):
             self._settings_scroll.setWidget(self._settings_panel)
             self._settings_scroll.setWidgetResizable(True)
             self._settings_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-            self._settings_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+            self._settings_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; } QWidget { background: transparent; }")
             self._settings_scroll.setVisible(False)
             # Don't let settings hog space — cap at 300px, give rest to log
             self._settings_scroll.setMaximumHeight(320)
@@ -887,8 +920,11 @@ class DashboardWindow(QMainWindow):
             self._settings_scroll = None
 
         # ── Status log ──
-        log_label = QLabel("Status Log")
-        log_label.setStyleSheet("color: #808080; font-size: 11px;")
+        log_label = QLabel("STATUS LOG")
+        log_label.setStyleSheet(
+            "color: #556677; font-size: 10px; font-weight: bold; "
+            "letter-spacing: 1px;"
+        )
         main_layout.addWidget(log_label)
 
         self._log_area = QTextEdit()
@@ -896,28 +932,136 @@ class DashboardWindow(QMainWindow):
         self._log_area.setMinimumHeight(100)
         main_layout.addWidget(self._log_area, stretch=1)
 
-        # ── Bottom bar: stop button ──
+        # ── Bottom bar: action buttons ──
         bottom = QHBoxLayout()
+
+        _btn_style = """
+            QPushButton {{
+                background-color: {bg};
+                color: {fg};
+                border: 1px solid {border};
+                border-radius: 6px;
+                padding: 7px 18px;
+                font-size: 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{ background-color: {hover}; }}
+            QPushButton:pressed {{ background-color: {pressed}; }}
+            QPushButton:disabled {{ background-color: #16213e; color: #445566; border-color: #1e2d4a; }}
+        """
+
+        # Pause button
+        self._pause_btn = QPushButton("Pause")
+        self._pause_btn.setMinimumWidth(90)
+        self._pause_btn.setStyleSheet(_btn_style.format(
+            bg="#1a3a6a", fg="#90CAF9", border="#2a5a8a",
+            hover="#2a4a7a", pressed="#0a2a5a"))
+        self._pause_btn.clicked.connect(self._on_pause_clicked)
+        self._pause_btn.setVisible(False)
+        bottom.addWidget(self._pause_btn)
+
+        # Resume button (shown when paused or in charge mode)
+        self._resume_btn = QPushButton("Resume")
+        self._resume_btn.setMinimumWidth(90)
+        self._resume_btn.setStyleSheet(_btn_style.format(
+            bg="#1a4a2a", fg="#A5D6A7", border="#2a6a3a",
+            hover="#2a5a3a", pressed="#0a3a1a"))
+        self._resume_btn.clicked.connect(self._on_resume_clicked)
+        self._resume_btn.setVisible(False)
+        bottom.addWidget(self._resume_btn)
+
+        # Charge mode button
+        self._charge_btn = QPushButton("Charge")
+        self._charge_btn.setMinimumWidth(90)
+        self._charge_btn.setToolTip("Stop webcam to maximize USB charging")
+        self._charge_btn.setStyleSheet(_btn_style.format(
+            bg="#3a1a5a", fg="#CE93D8", border="#5a2a7a",
+            hover="#4a2a6a", pressed="#2a0a4a"))
+        self._charge_btn.clicked.connect(self._on_charge_clicked)
+        self._charge_btn.setVisible(False)
+        bottom.addWidget(self._charge_btn)
+
         bottom.addStretch()
 
+        # Stop button
         self._stop_btn = QPushButton("Stop")
         self._stop_btn.setMinimumWidth(80)
-        self._stop_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #333333;
-                color: #E0E0E0;
-                border: 1px solid #555555;
-                border-radius: 4px;
-                padding: 6px 16px;
-                font-size: 12px;
-            }
-            QPushButton:hover { background-color: #444444; }
-            QPushButton:pressed { background-color: #222222; }
-        """)
+        self._stop_btn.setStyleSheet(_btn_style.format(
+            bg="#16213e", fg="#9E9E9E", border="#1e2d4a",
+            hover="#1e2d4a", pressed="#0d1526"))
         self._stop_btn.clicked.connect(self._on_stop_clicked)
         bottom.addWidget(self._stop_btn)
 
         main_layout.addLayout(bottom)
+
+        # ── System tray icon ──
+        self._setup_system_tray()
+
+    def _setup_system_tray(self):
+        """Set up system tray icon with context menu."""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            log.debug("[EVENT:tray] System tray not available")
+            self._tray_icon = None
+            return
+
+        self._tray_icon = QSystemTrayIcon(self)
+        # Use a simple colored circle as tray icon
+        from PyQt6.QtGui import QPixmap, QPainter
+        pixmap = QPixmap(32, 32)
+        pixmap.fill(QColor(0, 0, 0, 0))
+        painter = QPainter(pixmap)
+        painter.setBrush(QColor("#4CAF50"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(4, 4, 24, 24)
+        painter.end()
+        self._tray_icon.setIcon(QIcon(pixmap))
+        self._tray_icon.setToolTip("GoPro Bridge")
+
+        # Context menu
+        tray_menu = QMenu()
+        tray_menu.setStyleSheet("""
+            QMenu { background-color: #16213e; color: #E0E0E0; border: 1px solid #1e2d4a; border-radius: 4px; }
+            QMenu::item { padding: 6px 20px; }
+            QMenu::item:selected { background-color: #1e2d4a; }
+        """)
+        show_action = tray_menu.addAction("Show")
+        show_action.triggered.connect(self._tray_show)
+        tray_menu.addSeparator()
+        quit_action = tray_menu.addAction("Quit")
+        quit_action.triggered.connect(self._tray_quit)
+        self._tray_icon.setContextMenu(tray_menu)
+        self._tray_icon.activated.connect(self._tray_activated)
+        self._tray_icon.show()
+
+    def _tray_activated(self, reason):
+        """Handle tray icon double-click — restore window."""
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self._tray_show()
+
+    def _tray_show(self):
+        """Restore window from tray."""
+        self.showNormal()
+        self.activateWindow()
+
+    def _tray_quit(self):
+        """Quit from tray — stop controller and exit."""
+        self.controller.stop()
+        QApplication.instance().quit()
+
+    def closeEvent(self, event):
+        """Minimize to tray on close instead of quitting."""
+        if self._tray_icon and self._tray_icon.isVisible():
+            self.hide()
+            self._tray_icon.showMessage(
+                "GoPro Bridge",
+                "Minimized to tray. Double-click to restore.",
+                QSystemTrayIcon.MessageIcon.Information,
+                2000,
+            )
+            event.ignore()
+        else:
+            self.controller.stop()
+            event.accept()
 
     # ── Signal wiring ────────────────────────────────────────────────
 
@@ -974,8 +1118,18 @@ class DashboardWindow(QMainWindow):
 
         # Hide the manual guide when we move to an active/recovering state
         if state in (AppState.DISCOVERING, AppState.CONNECTING,
-                     AppState.STREAMING, AppState.RECONNECTING):
+                     AppState.STREAMING, AppState.RECONNECTING,
+                     AppState.PAUSED, AppState.CHARGE_MODE):
             self._manual_guide.hide_guide()
+
+        # Show/hide action buttons based on state
+        is_streaming = state == AppState.STREAMING
+        is_paused = state == AppState.PAUSED
+        is_charging = state == AppState.CHARGE_MODE
+
+        self._pause_btn.setVisible(is_streaming)
+        self._charge_btn.setVisible(is_streaming or is_paused)
+        self._resume_btn.setVisible(is_paused or is_charging)
 
         log.debug("[EVENT:state_change] GUI updated for state: %s", state.name)
 
@@ -1009,7 +1163,17 @@ class DashboardWindow(QMainWindow):
         """Update camera info display (battery level, etc.)."""
         battery = info.get("battery_level")
         if battery is not None:
-            self._battery_label.setText(f"🔋 {battery}%")
+            # Color-coded battery indicator
+            if battery <= 10:
+                icon, color = "🪫", "#F44336"  # Red
+            elif battery <= 25:
+                icon, color = "🔋", "#FF9800"  # Orange
+            elif battery <= 50:
+                icon, color = "🔋", "#FFEB3B"  # Yellow
+            else:
+                icon, color = "🔋", "#4CAF50"  # Green
+            self._battery_label.setText(f"{icon} {battery}%")
+            self._battery_label.setStyleSheet(f"color: {color}; font-size: 12px;")
             self._battery_label.setVisible(True)
 
     @pyqtSlot(str)
@@ -1074,6 +1238,21 @@ class DashboardWindow(QMainWindow):
         """Handle stop button click."""
         log.info("[EVENT:shutdown] User clicked Stop")
         self.controller.stop()
+
+    def _on_pause_clicked(self):
+        """Handle pause button click."""
+        log.info("[EVENT:pause] User clicked Pause")
+        self.controller.pause_webcam()
+
+    def _on_resume_clicked(self):
+        """Handle resume button click."""
+        log.info("[EVENT:resume] User clicked Resume")
+        self.controller.resume_webcam()
+
+    def _on_charge_clicked(self):
+        """Handle charge mode button click."""
+        log.info("[EVENT:charge_mode] User clicked Charge")
+        self.controller.enter_charge_mode()
 
     # ── Public API ───────────────────────────────────────────────────
 

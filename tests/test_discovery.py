@@ -741,13 +741,14 @@ class TestDiscoveryMethod(unittest.TestCase):
     """Test DiscoveryMethod enum."""
 
     def test_values(self):
+        self.assertEqual(DiscoveryMethod.SERIAL.value, "serial")
         self.assertEqual(DiscoveryMethod.USB_SCAN.value, "usb_scan")
         self.assertEqual(DiscoveryMethod.IP_SCAN.value, "ip_scan")
         self.assertEqual(DiscoveryMethod.MDNS.value, "mdns")
 
     def test_all_methods_present(self):
         methods = list(DiscoveryMethod)
-        self.assertEqual(len(methods), 3)
+        self.assertEqual(len(methods), 4)
 
 
 # ============================================================================

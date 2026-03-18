@@ -54,6 +54,8 @@ class AppState(Enum):
     DISCOVERING = auto()
     CONNECTING = auto()
     STREAMING = auto()
+    PAUSED = auto()
+    CHARGE_MODE = auto()
     RECONNECTING = auto()
     DISCONNECTED = auto()
     ERROR = auto()
@@ -136,7 +138,7 @@ class AppController:
         # to detect stream freezes independently of USB events and ffmpeg health
         self._staleness_thread: Optional[threading.Thread] = None
         self._staleness_interval: float = self.config.stale_poll_interval
-        self._staleness_was_stale: bool = False  # Edge detection: only trigger once per stale transition
+        self._staleness_was_stale: bool = True  # Start True to avoid false trigger before first frame arrives
 
         # Recovery state tracking
         self._recovery_count = 0
@@ -247,6 +249,113 @@ class AppController:
             self.stop()
 
         self.start()
+
+    def pause_webcam(self):
+        """Pause streaming — freeze-frame shown to downstream apps.
+
+        Stops the GoPro stream and ffmpeg, but keeps the connection alive
+        and the virtual camera open. Downstream apps see a frozen image.
+        """
+        if self.state != AppState.STREAMING:
+            log.warning("[EVENT:pause] Cannot pause — not streaming (state=%s)", self.state.name)
+            return
+
+        log.info("[EVENT:pause] Pausing webcam stream")
+        self._emit_status("Pausing webcam...", "info")
+
+        # Enter freeze-frame so downstream apps keep seeing the last frame
+        if self._frame_pipeline:
+            self._frame_pipeline.enter_freeze_frame()
+
+        # Stop ffmpeg / stream reader
+        if self._stream_reader:
+            try:
+                self._stream_reader.stop()
+            except Exception:
+                log.debug("Failed to stop stream reader during pause")
+
+        # Stop the GoPro stream (transition to READY, not full exit)
+        try:
+            self.gopro.stop_webcam()
+        except Exception:
+            log.debug("Failed to stop webcam during pause")
+
+        # Stop staleness monitor (no frames expected while paused)
+        self._stop_staleness_monitor()
+
+        self._set_state(AppState.PAUSED)
+        self._emit_status("Webcam paused — freeze-frame active", "info")
+
+    def resume_webcam(self):
+        """Resume streaming after a pause.
+
+        Restarts the GoPro stream and ffmpeg, swaps in a new reader.
+        """
+        if self.state not in (AppState.PAUSED, AppState.CHARGE_MODE):
+            log.warning("[EVENT:resume] Cannot resume — not paused (state=%s)", self.state.name)
+            return
+
+        log.info("[EVENT:resume] Resuming webcam stream")
+        self._emit_status("Resuming webcam...", "info")
+
+        # Restart the GoPro webcam stream
+        if not self.gopro.start_webcam():
+            self._emit_status("Failed to restart webcam — try again", "error")
+            return
+
+        # Create a new stream reader and swap it into the pipeline
+        try:
+            self._create_and_swap_stream_reader()
+        except Exception as e:
+            log.error("[EVENT:resume] Failed to create stream reader: %s", e)
+            self._emit_status(f"Failed to resume stream: {e}", "error")
+            return
+
+        # Restart staleness monitor
+        self._start_staleness_monitor()
+
+        self._set_state(AppState.STREAMING)
+        self._emit_status("Live video restored!", "success")
+
+    def enter_charge_mode(self):
+        """Enter charge mode — exit webcam to maximize USB charging.
+
+        Stops everything except the USB connection monitoring, so the
+        camera can charge faster over USB.
+        """
+        if self.state not in (AppState.STREAMING, AppState.PAUSED):
+            log.warning("[EVENT:charge_mode] Cannot enter charge mode (state=%s)", self.state.name)
+            return
+
+        log.info("[EVENT:charge_mode] Entering charge mode")
+        self._emit_status("Entering charge mode...", "info")
+
+        # Enter freeze-frame first
+        if self._frame_pipeline:
+            self._frame_pipeline.enter_freeze_frame()
+
+        # Stop streaming pipeline
+        if self._stream_reader:
+            try:
+                self._stream_reader.stop()
+            except Exception:
+                log.debug("Failed to stop stream reader for charge mode")
+
+        # Stop staleness monitor
+        self._stop_staleness_monitor()
+
+        # Fully exit webcam mode (not just stop — exit frees more power)
+        try:
+            self.gopro.stop_webcam()
+        except Exception:
+            log.debug("Failed to stop webcam for charge mode")
+        try:
+            self.gopro.exit_webcam()
+        except Exception:
+            log.debug("Failed to exit webcam for charge mode")
+
+        self._set_state(AppState.CHARGE_MODE)
+        self._emit_status("Charge mode active — webcam stopped to maximize charging", "info")
 
     # ── Pipeline Access (for GUI stats) ────────────────────────────
 
@@ -919,6 +1028,11 @@ class AppController:
 
         # Check 4: UDP port availability (with auto-selection fallback)
         from port_checker import find_available_port, PortInUseError
+        # Restore the user's preferred port if a previous run auto-selected
+        # a different one (ephemeral selection should not persist between runs)
+        if self.config._preferred_udp_port:
+            self.config.udp_port = self.config._preferred_udp_port
+            self.config._preferred_udp_port = 0
         preferred_port = self.config.udp_port
         self._emit_status(f"Checking UDP port {preferred_port} availability...", "info")
         try:
@@ -1631,14 +1745,13 @@ class AppController:
 
     # ── Resolution Change ─────────────────────────────────────────
 
-    # GoPro webcam resolution codes → stream pixel dimensions
-    # Resolution code → (width, height). Must match gopro_connection.RESOLUTION_MAP.
-    # Hero 12: 4=1080p, 7=720p, 12=4K
-    # Hero 13: 7=720p, 12=1080p (no 4K webcam, no code 4)
+    # GoPro webcam resolution codes -> stream pixel dimensions
+    # Resolution code -> (width, height). Must match gopro_connection.RESOLUTION_MAP.
+    # Codes vary by model; start_webcam() auto-remaps if the camera rejects a code.
     _RESOLUTION_MAP = {
-        4:  (1920, 1080),  # 1080p (Hero 12)
-        7:  (1280, 720),   # 720p (all models)
-        12: (1920, 1080),  # 1080p (Hero 13) — remapped from 4K
+        4:  (1920, 1080),  # 1080p
+        7:  (1280, 720),   # 720p
+        12: (1920, 1080),  # 1080p (alternate code)
     }
 
     def change_resolution(self, resolution: int, fov=None) -> bool:

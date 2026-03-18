@@ -14,7 +14,10 @@ a = Analysis(
     ['src/main.py'],
     pathex=['src'],
     binaries=pyvirtualcam_binaries,
-    datas=[],
+    datas=[
+        ('UnityCapture/UnityCaptureFilter64.dll', 'UnityCapture'),
+        ('UnityCapture/UnityCaptureFilter32.dll', 'UnityCapture'),
+    ],
     hiddenimports=[
         'pyvirtualcam',
         'pyvirtualcam._native_windows_obs',
@@ -44,6 +47,8 @@ a = Analysis(
         'gui',
         'utils',
         'stderr_ring_buffer',
+        'dependency_checker',
+        'setup_wizard',
     ],
     hookspath=[],
     hooksconfig={},

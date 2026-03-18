@@ -2,7 +2,7 @@
 usb_event_listener.py — Windows USB device notification listener for GoPro detection
 
 Uses Windows Device Notification APIs (RegisterDeviceNotification via ctypes)
-to receive real-time USB attach/detach events for GoPro Hero 12 devices.
+to receive real-time USB attach/detach events for GoPro devices.
 
 This provides instant notification when the GoPro is plugged in or unplugged,
 complementing the polling-based discovery in discovery.py with event-driven
@@ -11,7 +11,7 @@ detection for faster response times.
 Architecture:
   - Creates a hidden message-only window to receive WM_DEVICECHANGE messages
   - Registers for DBT_DEVICEARRIVAL and DBT_DEVICEREMOVECOMPLETE notifications
-  - Filters events by GoPro USB vendor IDs (0x2672 and 0x0A70)
+  - Filters events by GoPro USB vendor ID (0x2672)
   - Fires callbacks on a background thread so the GUI stays responsive
   - Thread-safe start/stop lifecycle
 
@@ -45,7 +45,7 @@ log = get_logger(__name__)
 # --- GoPro USB identifiers (imported from discovery.py for single source of truth) ---
 from discovery import GOPRO_VENDOR_IDS
 
-GOPRO_VID_STRINGS = {f"VID_{vid:04X}" for vid in GOPRO_VENDOR_IDS}  # {"VID_2672", "VID_0A70"}
+GOPRO_VID_STRINGS = {f"VID_{vid:04X}" for vid in GOPRO_VENDOR_IDS}  # {"VID_2672"}
 # Build a regex alternation pattern for all known GoPro vendor IDs
 _GOPRO_VID_PATTERN = re.compile(
     "|".join(f"VID_{vid:04X}" for vid in GOPRO_VENDOR_IDS),
@@ -236,8 +236,8 @@ def _is_gopro_device(device_name: str) -> bool:
     """Check if a device notification string matches a GoPro device.
 
     Device names from WM_DEVICECHANGE look like:
-        \\\\?\\USB#VID_2672&PID_0059#...#{guid}   (Hero 12+)
-        \\\\?\\USB#VID_0A70&PID_000D#...#{guid}   (older models)
+        \\\\?\\USB#VID_2672&PID_0059#...#{guid}   (webcam mode)
+        \\\\?\\USB#VID_2672&PID_000D#...#{guid}   (RNDIS mode)
     We check for any known GoPro vendor ID pattern.
 
     Args:
@@ -256,7 +256,7 @@ class USBEventListener:
     """Listens for GoPro USB attach/detach events via Windows device notifications.
 
     Creates a hidden message-only window on a background thread that receives
-    WM_DEVICECHANGE messages. When a GoPro device (VID_2672 or VID_0A70)
+    WM_DEVICECHANGE messages. When a GoPro device (VID_2672)
     is detected, the appropriate callback fires.
 
     Thread safety:

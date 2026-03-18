@@ -11,7 +11,7 @@ Once a GoPro is detected on USB (by discovery.py), this module:
   7. Disconnect detection: Detects when camera goes away, signals reconnect
 
 Discovery of the GoPro device is delegated to discovery.py, which handles
-USB enumeration (vendor ID 0x0A70, GoPro Inc.) and network interface scanning.
+USB enumeration (vendor ID 0x2672, GoPro Inc.) and network interface scanning.
 This module takes the discovered IP and manages the HTTP API interaction.
 
 Thread safety:
@@ -50,28 +50,27 @@ _TIMEOUT_QUICK = 3.0    # Status checks and keep-alive
 _TIMEOUT_NORMAL = 5.0   # Most API calls
 _TIMEOUT_START = 10.0   # Webcam start (camera needs time to switch modes)
 
-# GoPro resolution codes → (width, height, label)
+# GoPro resolution codes -> (width, height, label)
 # Maps the 'res' parameter for /gopro/webcam/start to human-readable info.
-# NOTE: Resolution codes differ across GoPro models:
-#   Hero 12: 4=1080p, 7=720p, 12=4K
-#   Hero 13: 12=1080p, 7=720p (no 4K webcam, code 4 doesn't exist)
-# When the camera rejects a resolution, start_webcam() auto-remaps using
-# the supported_settings returned in the error response.
+# NOTE: Resolution codes vary across GoPro models and firmware versions.
+# When the camera rejects a resolution code, start_webcam() auto-remaps
+# using the supported_settings returned in the error response, so the app
+# adapts dynamically to whatever the connected camera supports.
 RESOLUTION_MAP = {
     7:  (1280, 720, "720p"),
     4:  (1920, 1080, "1080p"),
-    12: (1920, 1080, "1080p"),  # Hero 13 uses 12 for 1080p
+    12: (1920, 1080, "1080p"),
 }
 
 # Valid resolution codes accepted by the GoPro webcam API
 VALID_RESOLUTIONS = set(RESOLUTION_MAP.keys())
 
 # Maps a human-readable resolution name to all known codes that represent it
-# Used to remap when the camera rejects a code (e.g., Hero 13 doesn't accept res=4)
+# Used to remap when the camera rejects a code (some models don't accept all codes)
 _RESOLUTION_BY_NAME = {
     "720": 7,
     "720p": 7,
-    "1080": 12,  # Default to Hero 13 code; start_webcam remaps dynamically
+    "1080": 12,  # Default code; start_webcam remaps dynamically per camera
     "1080p": 12,
     "4k": 12,
     "4K": 12,
@@ -104,9 +103,9 @@ class WebcamStatus(IntEnum):
 class CameraMode(IntEnum):
     """High-level GoPro operating mode detected via USB queries.
 
-    The GoPro Hero 12 can be in one of several modes. This enum represents
-    the mode as determined by combining /gopro/webcam/status (webcam state
-    machine) with /gopro/camera/state (overall camera state, preset group).
+    A GoPro can be in one of several modes. This enum represents the mode
+    as determined by combining /gopro/webcam/status (webcam state machine)
+    with /gopro/camera/state (overall camera state, preset group).
 
     Open GoPro status IDs used:
       - Status 89 (0x59): Active preset group (0=video, 1=photo, 2=timelapse)
@@ -443,7 +442,7 @@ class GoProConnection:
         """Find the GoPro on USB and verify its HTTP API.
 
         Uses timed_full_discovery() from discovery.py which:
-          1. Enumerates USB devices for GoPro vendor ID (0x0A70)
+          1. Enumerates USB devices for GoPro vendor ID (0x2672)
           2. Scans network interfaces (ipconfig, psutil) for NCM adapter
           3. Polls for IP resolution with configurable overall timeout
           4. Probes candidate IPs on port 8080
@@ -476,10 +475,24 @@ class GoProConnection:
 
         if device.camera_ip:
             self._notify(f"Found GoPro: {device.description} (USB {device.usb_id_str})", "info")
+
+            # Some GoPro models (Hero 13+) require wired USB control to be
+            # enabled before the webcam API responds.  Pre-set base_url so
+            # _api_get works, then try to enable USB control before the full
+            # verification check.
+            with self._lock:
+                self.ip = device.camera_ip
+                self.base_url = f"http://{device.camera_ip}:{GOPRO_API_PORT}"
+            self._try_enable_usb_control_early()
+
             if self._verify_connection(device.camera_ip):
                 return True
             else:
                 self._notify("GoPro found on USB but HTTP API not responding", "warning")
+                # Clean up partial state so open_connection starts fresh
+                with self._lock:
+                    self.ip = None
+                    self.base_url = None
                 return False
         else:
             # Shouldn't reach here since timed_full_discovery raises on timeout,
@@ -491,6 +504,27 @@ class GoProConnection:
             return False
 
     # -- Connection helpers --------------------------------------------------
+
+    def _try_enable_usb_control_early(self):
+        """Best-effort attempt to enable wired USB control during discovery.
+
+        Some GoPro models (Hero 13 and newer firmware) won't respond to
+        /gopro/webcam/status until wired USB control is explicitly enabled.
+        This sends the enable command early so the subsequent verification
+        check succeeds.  Failures are silently ignored — the full
+        open_connection() flow will retry later.
+        """
+        try:
+            resp = requests.get(
+                f"{self.base_url}/gopro/camera/control/wired_usb?p=1",
+                timeout=_TIMEOUT_NORMAL,
+            )
+            if resp.status_code == 200:
+                log.info("[EVENT:discovery] Early USB control enable succeeded")
+            else:
+                log.debug("[EVENT:discovery] Early USB control enable returned %d", resp.status_code)
+        except requests.RequestException as e:
+            log.debug("[EVENT:discovery] Early USB control enable failed: %s", e)
 
     def _verify_connection(self, ip: str) -> bool:
         """Verify the camera at this IP responds to the HTTP API."""
@@ -1022,19 +1056,18 @@ class GoProConnection:
             )
             return False
 
-        # Step 3: Handle IDLE workaround
-        if status == WebcamStatus.IDLE:
-            log.info("[EVENT:state_change] Camera in IDLE state — performing start/stop reset workaround")
+        # Step 3: Pre-emptive state reset — always clean the webcam state
+        # machine before starting. This prevents error code 4 (invalid state)
+        # on first attempt, which otherwise requires a full rediscovery cycle.
+        if status in (WebcamStatus.IDLE, WebcamStatus.STREAMING, WebcamStatus.READY):
+            if status == WebcamStatus.IDLE:
+                log.info("[EVENT:state_change] Camera in IDLE state — performing reset workaround")
+            else:
+                log.info("[EVENT:stream_stop] Camera in %s — stopping first to clean state", status.name)
+                self._notify("Resetting webcam state...", "info")
             self.reset_webcam_state()
             status = self.webcam_status()
-            log.info("[EVENT:state_change] Status after IDLE reset: %s", status.name)
-
-        # Step 4: Handle already-active state
-        if status in (WebcamStatus.STREAMING, WebcamStatus.READY):
-            log.info("[EVENT:stream_stop] Camera already in %s — stopping first to apply new settings", status.name)
-            self._notify("Stopping existing stream to apply settings...", "info")
-            self._api_get("/gopro/webcam/stop", timeout=_TIMEOUT_NORMAL)
-            time.sleep(self.config.idle_reset_delay)
+            log.info("[EVENT:state_change] Status after pre-emptive reset: %s", status.name)
 
         # Step 5: Send webcam/start with parameters
         endpoint = f"/gopro/webcam/start?res={res}&fov={field_of_view}&port={self.config.udp_port}"
@@ -1283,24 +1316,32 @@ class GoProConnection:
             return None
 
         # Status IDs from Open GoPro spec differ across models:
-        #   Hero 12: 2 = battery level (0-100), 70 = battery present (bool)
-        #   Hero 13: 2 = internal_battery_present (bool), 70 = battery level (0-100)
-        # We detect which mapping to use based on the values.
+        #   Hero 12 and earlier: 2 = battery level (0-100), 70 = battery present (bool)
+        #   Hero 13+:           2 = internal_battery_present (bool), 70 = battery level (0-100)
+        # We detect which mapping to use based on the device model name.
         status = data.get("status", {})
         raw_2 = status.get("2", status.get(2, None))
         raw_70 = status.get("70", status.get(70, None))
 
-        # Heuristic: if status "2" is 0 or 1 and status "70" is > 1,
-        # the IDs are Hero 13 style (2=present, 70=level).
-        # Otherwise, Hero 12 style (2=level, 70=present).
-        if raw_2 is not None and raw_70 is not None and raw_2 in (0, 1) and raw_70 > 1:
-            # Hero 13 mapping
+        # Use device model name if available, fall back to value heuristic
+        model_name = ""
+        if self.device_info and self.device_info.description:
+            model_name = self.device_info.description.upper()
+
+        is_hero_13_plus = "HERO13" in model_name or "HERO14" in model_name or "HERO15" in model_name
+
+        # If model name not available, fall back to value heuristic
+        if not model_name and raw_2 is not None and raw_70 is not None:
+            is_hero_13_plus = raw_2 in (0, 1) and raw_70 > 1
+
+        if is_hero_13_plus:
+            # Hero 13+ mapping: 2=present (bool), 70=level (0-100)
             info = {
                 "battery_level": raw_70,
                 "battery_present": bool(raw_2),
             }
         else:
-            # Hero 12 mapping
+            # Hero 12 and earlier mapping: 2=level (0-100), 70=present (bool)
             info = {
                 "battery_level": raw_2,
                 "battery_present": raw_70,

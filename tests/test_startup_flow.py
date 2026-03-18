@@ -208,7 +208,8 @@ class TestStartupFlow:
              patch.object(controller.gopro, 'get_camera_info', return_value=None), \
              patch('shutil.which', return_value='/usr/bin/ffmpeg'), \
              patch('firewall.ensure_firewall_rule', return_value=True), \
-             patch('port_checker.check_udp_port_available', return_value=None), \
+             patch('port_checker.find_available_port', return_value=config.udp_port), \
+             patch('virtual_camera.detect_backend', return_value={"backend": "unitycapture", "is_recommended": True, "warning": None}), \
              _usb_listener_patch:
 
             controller.gopro._connected = True

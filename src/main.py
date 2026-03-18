@@ -3,13 +3,15 @@ main.py -- Entry point for GoPro Bridge
 
 Launches the application with automatic startup lifecycle:
   1. Initialize logging and config
-  2. Create the AppController (discovery-connect-initialize pipeline)
-  3. Launch GUI (PyQt6) or fall back to console mode
-  4. Auto-start the discovery-connect-initialize pipeline on startup
+  2. Run first-time setup wizard (if dependencies are missing)
+  3. Create the AppController (discovery-connect-initialize pipeline)
+  4. Launch GUI (PyQt6) or fall back to console mode
+  5. Auto-start the discovery-connect-initialize pipeline on startup
 
 The startup pipeline runs automatically when the app launches:
-  config → AppController → start() → _startup_flow() (background thread):
-    1. Check prerequisites (ffmpeg on PATH)
+  config → setup wizard (if needed) → AppController → start() →
+  _startup_flow() (background thread):
+    1. Check prerequisites (ffmpeg)
     2. Discover GoPro on USB (with retries)
     3. Open control connection (API verify, USB control, IDLE workaround)
     4. Start webcam mode (resolution + FOV)
@@ -67,6 +69,7 @@ _frozen_crash_handler()
 from config import Config
 from logger import setup_logger, get_logger
 from app_controller import AppController, AppState
+from dependency_checker import DependencyChecker
 
 
 def _run_console_mode(controller: AppController, config: Config, log):
@@ -125,7 +128,7 @@ def _run_console_mode(controller: AppController, config: Config, log):
     # Banner
     print()
     print("+======================================+")
-    print("|         GoPro Bridge v0.1.0          |")
+    print("|         GoPro Bridge v1.0.0          |")
     print("+======================================+")
     print()
 
@@ -168,6 +171,38 @@ def _run_gui_mode(controller: AppController, config: Config, log):
     log.info("[EVENT:startup] Launching GUI mode — pipeline will auto-start after window is shown")
     exit_code = run_gui(controller, config=config)
     return exit_code
+
+
+def _run_setup_if_needed(config: Config, log):
+    """Check dependencies and show the setup wizard if any are missing.
+
+    Runs the DependencyChecker. If all deps are satisfied, returns
+    immediately. Otherwise, launches the SetupWizard (blocking) and
+    updates config with any new paths (e.g., ffmpeg install location).
+    """
+    checker = DependencyChecker()
+    statuses = checker.check_all()
+    all_installed = all(s.installed for s in statuses)
+
+    if all_installed:
+        log.info("[EVENT:setup] All dependencies satisfied -- skipping setup wizard")
+        return
+
+    missing = [s.name for s in statuses if not s.installed]
+    log.info("[EVENT:setup] Missing dependencies: %s -- launching setup wizard", missing)
+
+    try:
+        from setup_wizard import run_setup_wizard
+
+        result = run_setup_wizard(checker)
+        if result and "ffmpeg_path" in result:
+            config.ffmpeg_path = result["ffmpeg_path"]
+            config.save()
+            log.info("[EVENT:setup] Config updated with ffmpeg_path: %s", result["ffmpeg_path"])
+    except ImportError as e:
+        log.warning("[EVENT:setup] Could not import setup wizard (%s) -- skipping", e)
+    except Exception as e:
+        log.error("[EVENT:setup] Setup wizard error: %s -- continuing anyway", e, exc_info=True)
 
 
 def main():
@@ -215,6 +250,10 @@ def main():
         config.reconnect_max_retries if config.reconnect_max_retries > 0 else "infinite",
         config.discovery_overall_timeout,
     )
+
+    # -- Step 2b: First-time setup (if dependencies missing) --
+    if not nogui:
+        _run_setup_if_needed(config, log)
 
     # -- Step 3: Create the app controller --
     # AppController owns the full pipeline: discovery → connection → streaming
