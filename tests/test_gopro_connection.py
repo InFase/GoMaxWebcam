@@ -319,6 +319,7 @@ class TestStartStopWebcam(unittest.TestCase):
         """start_webcam succeeds when camera reaches STREAMING."""
         mock_get.side_effect = [
             make_mock_response({"status": 0}),      # webcam_status: OFF
+            make_mock_response({"error": 0}),         # preview warmup (Phase 1.8)
             make_mock_response({"error": 0}),         # start command
             make_mock_response({"status": 3}),        # poll: STREAMING
         ]
@@ -330,14 +331,13 @@ class TestStartStopWebcam(unittest.TestCase):
 
     @patch("gopro_connection.requests.get")
     def test_start_webcam_accepts_ready(self, mock_get):
-        """start_webcam accepts READY after sufficient polling."""
+        """start_webcam accepts READY immediately (Phase 1.7)."""
         responses = [
             make_mock_response({"status": 0}),    # webcam_status: OFF
+            make_mock_response({"error": 0}),      # preview warmup (Phase 1.8)
             make_mock_response({"error": 0}),      # start command
+            make_mock_response({"status": 2}),     # first poll: READY — accepted immediately
         ]
-        # 7 polls returning READY (past the 6-attempt threshold)
-        for _ in range(7):
-            responses.append(make_mock_response({"status": 2}))
 
         mock_get.side_effect = responses
 
@@ -368,6 +368,7 @@ class TestStartStopWebcam(unittest.TestCase):
             make_mock_response({"error": 0}),      # stop (workaround)
             make_mock_response({"status": 0}),     # verify OFF
             make_mock_response({"status": 0}),     # status after reset: OFF
+            make_mock_response({"error": 0}),      # preview warmup (Phase 1.8)
             make_mock_response({"error": 0}),      # actual start command
             make_mock_response({"status": 3}),     # poll: STREAMING
         ]
