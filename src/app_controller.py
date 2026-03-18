@@ -295,17 +295,29 @@ class AppController:
             log.warning("[EVENT:resume] Cannot resume — not paused (state=%s)", self.state.name)
             return
 
-        log.info("[EVENT:resume] Resuming webcam stream")
+        log.info("[EVENT:resume] Resuming webcam stream (from %s)", self.state.name)
         self._emit_status("Resuming webcam...", "info")
 
-        # Restart the GoPro webcam stream
+        was_charge_mode = self.state == AppState.CHARGE_MODE
+
+        # Restart the GoPro webcam stream.
+        # After charge mode (exit_webcam was called), the camera is in OFF
+        # state and needs the full start_webcam flow.
+        # After pause (stop_webcam was called), the camera may be in READY
+        # or OFF state — start_webcam handles both.
+        # Give the camera time to settle before restarting.
+        if was_charge_mode:
+            time.sleep(max(self.config.idle_reset_delay, 2.0))
+
         if not self.gopro.start_webcam():
             self._emit_status("Failed to restart webcam — try again", "error")
             return
 
         # Create a new stream reader and swap it into the pipeline
         try:
-            self._create_and_swap_stream_reader()
+            if not self._create_and_swap_stream_reader():
+                self._emit_status("Failed to create stream reader for resume", "error")
+                return
         except Exception as e:
             log.error("[EVENT:resume] Failed to create stream reader: %s", e)
             self._emit_status(f"Failed to resume stream: {e}", "error")

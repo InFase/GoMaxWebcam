@@ -1059,18 +1059,26 @@ class GoProConnection:
             )
             return False
 
-        # Step 3: Pre-emptive state reset — always clean the webcam state
-        # machine before starting. This prevents error code 4 (invalid state)
-        # on first attempt, which otherwise requires a full rediscovery cycle.
-        if status in (WebcamStatus.IDLE, WebcamStatus.STREAMING, WebcamStatus.READY):
-            if status == WebcamStatus.IDLE:
-                log.info("[EVENT:state_change] Camera in IDLE state — performing reset workaround")
-            else:
-                log.info("[EVENT:stream_stop] Camera in %s — stopping first to clean state", status.name)
-                self._notify("Resetting webcam state...", "info")
+        # Step 3: Pre-emptive state reset — only for IDLE state (stale after
+        # fresh USB connect). READY and STREAMING states are handled differently:
+        # - READY: camera was just stopped intentionally (pause/resolution change)
+        #   — skip reset, just send start with new params
+        # - STREAMING: already streaming, send stop first then start
+        # - IDLE: stale state from USB connect, needs the start/stop workaround
+        if status == WebcamStatus.IDLE:
+            log.info("[EVENT:state_change] Camera in IDLE state — performing reset workaround")
             self.reset_webcam_state()
             status = self.webcam_status()
-            log.info("[EVENT:state_change] Status after pre-emptive reset: %s", status.name)
+            log.info("[EVENT:state_change] Status after IDLE reset: %s", status.name)
+        elif status == WebcamStatus.STREAMING:
+            log.info("[EVENT:stream_stop] Camera is STREAMING — stopping first")
+            self._notify("Stopping current stream...", "info")
+            self._api_get("/gopro/webcam/stop", timeout=_TIMEOUT_NORMAL)
+            time.sleep(max(self.config.idle_reset_delay, 1.0))
+            status = self.webcam_status()
+            log.info("[EVENT:state_change] Status after stop: %s", status.name)
+        elif status == WebcamStatus.READY:
+            log.info("[EVENT:stream_start] Camera is READY — proceeding to start directly")
 
         # Step 5: Send webcam/start with parameters
         endpoint = f"/gopro/webcam/start?res={res}&fov={field_of_view}&port={self.config.udp_port}"
