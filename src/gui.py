@@ -740,15 +740,37 @@ class SettingsPanel(QWidget):
             QTimer.singleShot(2000, lambda: self._save_btn.setText("Save Settings"))
 
     def _do_restart(self):
-        """Stop the controller and re-exec the application."""
+        """Stop the controller and re-launch the application.
+
+        Uses subprocess.Popen instead of os.execv to avoid corrupting
+        PyInstaller's _internal directory when running as a frozen exe.
+        The new process starts independently before this one exits.
+        """
         import os
+        import subprocess
         self._controller.stop()
-        # Re-launch the same process
-        python = sys.executable
-        script = os.path.abspath(sys.argv[0])
-        args = sys.argv[1:]
-        log.info("[EVENT:config] Execing: %s %s %s", python, script, args)
-        os.execv(python, [python, script] + args)
+
+        if getattr(sys, 'frozen', False):
+            # Frozen exe: just re-launch the exe
+            exe = sys.executable
+            log.info("[EVENT:config] Restarting frozen exe: %s", exe)
+            subprocess.Popen(
+                [exe],
+                creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0),
+            )
+        else:
+            # Running from source: re-launch with python
+            python = sys.executable
+            script = os.path.abspath(sys.argv[0])
+            args = sys.argv[1:]
+            log.info("[EVENT:config] Restarting: %s %s %s", python, script, args)
+            subprocess.Popen(
+                [python, script] + args,
+                creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0),
+            )
+
+        # Exit this process
+        QApplication.instance().quit()
 
     # ── Public API ──
 
