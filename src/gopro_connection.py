@@ -954,7 +954,10 @@ class GoProConnection:
         camera is completely unreachable.
         """
         self._notify("Resetting webcam state (IDLE workaround)...", "info")
-        delay = self.config.idle_reset_delay
+        # Enforce a minimum delay — the GoPro state machine needs time to
+        # process transitions. Values below 1.0s cause rapid cycling that
+        # puts the camera into UNAVAILABLE state.
+        delay = max(self.config.idle_reset_delay, 1.0)
 
         # Check if reset is needed
         current = self.webcam_status()

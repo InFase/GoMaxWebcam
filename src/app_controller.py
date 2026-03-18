@@ -962,6 +962,45 @@ class AppController:
             self._emit_status(f"Unexpected error: {e}", "error")
             self._set_state(AppState.ERROR)
 
+    def _kill_orphaned_ffmpeg(self):
+        """Kill any orphaned ffmpeg processes that are binding our UDP port.
+
+        When GoProBridge crashes or is killed by Task Manager, the ffmpeg
+        subprocess may keep running and hold the UDP port. This prevents
+        the next launch from binding to the same port, forcing auto-selection
+        to a different port number.
+
+        Only kills ffmpeg processes whose command line includes our UDP port.
+        """
+        try:
+            import psutil
+            target_port = str(self.config.udp_port)
+            killed = 0
+            for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+                try:
+                    if proc.info["name"] and "ffmpeg" in proc.info["name"].lower():
+                        cmdline = proc.info.get("cmdline") or []
+                        cmd_str = " ".join(cmdline)
+                        if target_port in cmd_str and "udp" in cmd_str.lower():
+                            log.info(
+                                "[EVENT:startup] Killing orphaned ffmpeg (PID %d) "
+                                "holding UDP port %s",
+                                proc.pid, target_port,
+                            )
+                            proc.kill()
+                            proc.wait(timeout=3)
+                            killed += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+            if killed:
+                self._emit_status(
+                    f"Cleaned up {killed} orphaned ffmpeg process(es)", "info"
+                )
+                # Brief wait for port release
+                time.sleep(0.5)
+        except Exception as e:
+            log.debug("Orphaned ffmpeg cleanup failed: %s", e)
+
     def _check_prerequisites(self) -> bool:
         """Verify that ffmpeg is available, firewall rule is in place, and port is free.
 
@@ -993,6 +1032,10 @@ class AppController:
                 "error"
             )
             return False
+
+        # Check 1b: Kill orphaned ffmpeg processes from previous crashes
+        # These hold the UDP port and prevent the new ffmpeg from binding.
+        self._kill_orphaned_ffmpeg()
 
         # Check 2: Firewall rule for UDP 8554
         self._emit_status("Checking firewall rule for UDP port 8554...", "info")
@@ -1888,16 +1931,19 @@ class AppController:
             )
             return False
 
-        # Stop current webcam mode so we can re-start with new params
+        # Fully exit webcam mode before restarting with new params.
+        # Using exit (not just stop) ensures a clean state transition
+        # and avoids the camera getting stuck in UNAVAILABLE.
         try:
-            self.gopro.stop_webcam()
+            self.gopro.exit_webcam()
         except Exception as e:
             log.warning(
-                "[EVENT:resolution_change] Error stopping webcam: %s", e
+                "[EVENT:resolution_change] Error exiting webcam: %s", e
             )
 
-        # Brief pause for camera state machine reset
-        time.sleep(self.config.idle_reset_delay)
+        # The camera needs time to fully exit webcam mode before
+        # re-entering. Minimum 2 seconds to avoid UNAVAILABLE errors.
+        time.sleep(max(self.config.idle_reset_delay, 2.0))
 
         # Start webcam with new resolution
         return self.gopro.start_webcam(resolution=resolution, fov=fov)
