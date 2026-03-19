@@ -151,12 +151,21 @@ def _set_obs_registry_name(name: str) -> bool:
     except (OSError, FileNotFoundError):
         return False
 
-    # Phase 5.2: Avoid repeated UAC prompts within the same session
+    # Phase 5.2: Avoid repeated UAC prompts for the SAME name within a session.
+    # If the user changed the name since the last attempt, allow re-prompting.
     import tempfile
     marker_path = os.path.join(tempfile.gettempdir(), "gopro_bridge_reg_attempted.marker")
     if os.path.exists(marker_path):
-        log.debug("Registry rename already attempted this session")
-        return False
+        try:
+            with open(marker_path) as f:
+                marker_name = f.read().strip()
+            if marker_name == name:
+                log.debug("Registry rename to '%s' already attempted this session", name)
+                return False
+            else:
+                log.info("Name changed from '%s' to '%s' — allowing new UAC attempt", marker_name, name)
+        except OSError:
+            pass
 
     # Fallback: use elevated reg.exe (triggers one UAC prompt via a batch)
     try:
