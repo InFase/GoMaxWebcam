@@ -838,7 +838,12 @@ class AppController:
             log.debug("[EVENT:staleness_monitor] Already running, skipping start")
             return
 
-        self._staleness_was_stale = False
+        # Start with stale=True so the first poll doesn't trigger a
+        # fresh->stale edge. The frame buffer is naturally stale when
+        # no frames have arrived yet (cold start, resume from charge).
+        # The first real fresh->stale transition will fire after frames
+        # start flowing and then stop.
+        self._staleness_was_stale = True
         self._staleness_stop_event.clear()
         self._staleness_thread = threading.Thread(
             target=self._staleness_monitor_loop,

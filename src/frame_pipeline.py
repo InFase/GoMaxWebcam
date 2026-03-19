@@ -237,6 +237,12 @@ class FramePipeline:
         self._last_fps_time = time.monotonic()
         self._last_fps_count = 0
 
+        # Set warmup grace on initial start — ffmpeg needs time to connect
+        # to the UDP stream and produce the first frame. Without this, the
+        # pipeline enters freeze-frame after 10 None reads (~330ms) and
+        # triggers a false recovery on every cold start.
+        self._reader_swap_time = time.monotonic()
+
         self._thread = threading.Thread(
             target=self._run_loop,
             name="frame-pipeline",
