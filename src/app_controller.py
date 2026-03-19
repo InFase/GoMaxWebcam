@@ -257,31 +257,47 @@ class AppController:
         self.start()
 
     def pause_webcam(self):
-        """Pause streaming — instant freeze-frame shown to downstream apps.
+        """Pause streaming — GoPro stops streaming, downstream apps see freeze-frame.
 
-        Keeps ffmpeg, GoPro stream, and all monitors running. The pipeline
-        enters freeze-frame mode where it pushes the last good frame to the
-        virtual camera while a background drain thread keeps reading ffmpeg
-        stdout to prevent pipe blockage.
+        The camera's red webcam icon turns off (camera enters IDLE state).
+        The virtual camera stays open showing the last good frame so
+        downstream apps (Zoom, Teams) never lose the camera device.
 
-        Resume is instant — just unfreeze the pipeline.
+        On resume, the GoPro stream is restarted and a new ffmpeg process
+        is swapped into the pipeline.
         """
         if self.state != AppState.STREAMING:
             log.warning("[EVENT:pause] Cannot pause — not streaming (state=%s)", self.state.name)
             return
 
-        log.info("[EVENT:pause] Pausing webcam stream (instant freeze)")
+        log.info("[EVENT:pause] Pausing webcam stream")
         self._emit_status("Pausing webcam...", "info")
 
         # Set state FIRST so monitoring callbacks see PAUSED immediately
         self._set_state(AppState.PAUSED)
 
-        # Enter freeze-frame — the drain thread keeps ffmpeg stdout flowing
+        # Stop monitors before killing ffmpeg to prevent false recovery
+        self._stop_staleness_monitor()
+        self._stop_disconnect_detector()
+
+        # Enter freeze-frame (downstream apps keep seeing last good frame)
         if self._frame_pipeline:
             self._frame_pipeline.enter_freeze_frame()
 
-        # Do NOT stop ffmpeg, GoPro stream, monitors, or disconnect detector
-        self._emit_status("Webcam paused — freeze-frame active", "info")
+        # Stop ffmpeg
+        if self._stream_reader:
+            try:
+                self._stream_reader.stop()
+            except Exception:
+                log.debug("Failed to stop stream reader during pause")
+
+        # Tell GoPro to stop streaming (camera enters IDLE, red icon turns off)
+        try:
+            self.gopro.stop_webcam()
+        except Exception:
+            log.debug("Failed to stop webcam during pause")
+
+        self._emit_status("Webcam paused", "info")
 
     def resume_webcam(self):
         """Resume streaming after a pause or charge mode.
@@ -297,16 +313,9 @@ class AppController:
         log.info("[EVENT:resume] Resuming webcam stream (from %s)", self.state.name)
         self._emit_status("Resuming webcam...", "info")
 
-        if self.state == AppState.PAUSED:
-            # Instant resume: ffmpeg and GoPro are still running
-            if self._frame_pipeline:
-                self._frame_pipeline.exit_freeze_frame()
-            self._set_state(AppState.STREAMING)
-            # Pipeline callback _on_pipeline_stream_recovered emits "Live video restored!"
-            return
-
-        # CHARGE_MODE: full restart flow (GoPro stream was stopped)
-        time.sleep(max(self.config.idle_reset_delay, 2.0))
+        if self.state == AppState.CHARGE_MODE:
+            # Charge mode did exit_webcam — needs more settle time
+            time.sleep(max(self.config.idle_reset_delay, 2.0))
 
         if not self.gopro.start_webcam():
             self._emit_status("Failed to restart webcam — try again", "error")
