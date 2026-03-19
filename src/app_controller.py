@@ -1896,7 +1896,7 @@ class AppController:
             )
             self._emit_status(
                 f"Invalid resolution code {resolution}. "
-                f"Use 7 (720p) or 12 (1080p).",
+                f"Valid codes: {sorted(self._RESOLUTION_MAP.keys())}.",
                 "error",
             )
             return False

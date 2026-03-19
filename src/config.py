@@ -140,6 +140,12 @@ class Config:
         else:
             _log.info("[EVENT:config] No config file found, creating with defaults at %s", config_path)
 
+        # Migrate legacy resolution code 4 -> 12 (Hero 12 used code 4 for
+        # 1080p, Hero 13 uses code 12. Code 4 is no longer in the GUI dropdown.)
+        if config.resolution == 4:
+            _log.info("[EVENT:config] Migrating legacy resolution code 4 -> 12 (1080p)")
+            config.resolution = 12
+
         # Always ensure directories exist
         _appdata_dir().mkdir(parents=True, exist_ok=True)
         _log_dir().mkdir(parents=True, exist_ok=True)
