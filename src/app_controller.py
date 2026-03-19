@@ -334,11 +334,11 @@ class AppController:
         # Set state BEFORE restarting monitors
         self._set_state(AppState.STREAMING)
 
-        # Restart monitoring (stopped during charge mode)
+        # Restart monitoring (stopped during pause/charge)
         self._start_disconnect_detector()
         self._start_staleness_monitor()
-
-        self._emit_status("Live video restored!", "success")
+        # Note: "Live video restored!" is emitted by _on_pipeline_stream_recovered
+        # when the new reader is swapped in and freeze-frame exits.
 
     def enter_charge_mode(self):
         """Enter charge mode — exit webcam to maximize USB charging.
