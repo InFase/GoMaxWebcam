@@ -50,7 +50,7 @@ Older models (Hero 8 and earlier) do not support USB webcam mode via the Open Go
 ## Features
 
 - **Automatic camera detection** — plug in the GoPro and it is found without any manual configuration.
-- **1080p at 30 fps by default**, with support for up to 4K depending on your GoPro model and system performance.
+- **1080p at 30 fps by default**, with 720p also available. Resolution options depend on your GoPro model and firmware.
 - **Freeze-frame recovery** — the last good frame is held during brief disconnects so your video feed does not go black mid-call.
 - **Broad app compatibility** — tested with Zoom, Microsoft Teams, OBS Studio, and NVIDIA Broadcast.
 - **Virtual camera via Unity Capture** — a low-overhead DirectShow virtual device that works with virtually any Windows application.

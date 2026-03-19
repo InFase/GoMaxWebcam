@@ -52,7 +52,7 @@ class Config:
     """
 
     # --- Camera settings ---
-    resolution: int = 4          # 4=1080p, 7=720p, 12=4K
+    resolution: int = 12         # 12=1080p, 7=720p (codes vary by model)
     fov: int = 4                 # 0=wide, 2=narrow, 3=superview, 4=linear
     anti_flicker: int = 1        # 0=60Hz (NTSC), 1=50Hz (PAL)
     virtual_camera_name: str = "GoPro Webcam"

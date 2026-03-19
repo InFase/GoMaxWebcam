@@ -72,15 +72,14 @@ _RESOLUTION_BY_NAME = {
     "720p": 7,
     "1080": 12,  # Default code; start_webcam remaps dynamically per camera
     "1080p": 12,
-    "4k": 12,
-    "4K": 12,
 }
+# Note: 4K webcam mode is not supported on most GoPro models (Hero 13 caps at 1080p)
 
 # Maps a logical resolution (width) to preferred code per camera generation
 _RESOLUTION_LABELS = {
     720: "720",
     1080: "1080",
-    2160: "4K",
+    2160: "2160",
 }
 
 
@@ -933,7 +932,7 @@ class GoProConnection:
 
                 # Try to find a matching option by label
                 if wanted_label:
-                    wanted_num = wanted_label.rstrip("p").upper()  # "1080" or "720" or "4K"
+                    wanted_num = wanted_label.rstrip("p").upper()  # "1080" or "720"
                     for opt in options:
                         if opt.get("display_name", "").upper() == wanted_num:
                             new_id = opt["id"]
@@ -1047,7 +1046,7 @@ class GoProConnection:
                   a client is actively reading the UDP feed)
 
         Args:
-            resolution: 4=1080p, 7=720p, 12=4K (default from config)
+            resolution: 7=720p, 12=1080p (codes vary by model)
             fov: 0=wide, 2=narrow, 3=superview, 4=linear (default from config)
 
         Returns:
@@ -1304,7 +1303,7 @@ class GoProConnection:
         """Check if the requested resolution/FOV differs from what's currently active.
 
         Args:
-            resolution: Desired resolution code (4=1080p, 7=720p, 12=4K).
+            resolution: Desired resolution code (7=720p, 12=1080p).
             fov: Desired FOV code, or None to keep current.
 
         Returns:
@@ -1333,7 +1332,7 @@ class GoProConnection:
           - Swapping the new reader into the pipeline
 
         Args:
-            resolution: New resolution code (4=1080p, 7=720p, 12=4K).
+            resolution: New resolution code (7=720p, 12=1080p).
             fov: New FOV code, or None to keep current FOV.
 
         Returns:

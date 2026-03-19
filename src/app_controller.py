@@ -1880,7 +1880,7 @@ class AppController:
         the previous resolution so the stream is never permanently broken.
 
         Args:
-            resolution: GoPro resolution code (4=1080p, 7=720p, 12=4K).
+            resolution: GoPro resolution code (7=720p, 12=1080p).
             fov: Optional FOV code (0=wide, 2=narrow, 3=superview, 4=linear).
                  If None, keeps current config value.
 
@@ -1895,7 +1895,7 @@ class AppController:
             )
             self._emit_status(
                 f"Invalid resolution code {resolution}. "
-                f"Use 4 (1080p), 7 (720p), or 12 (4K).",
+                f"Use 7 (720p) or 12 (1080p).",
                 "error",
             )
             return False
@@ -2179,7 +2179,7 @@ class AppController:
             delegates to change_resolution() for the full stop/restart cycle.
 
         Args:
-            resolution: GoPro resolution code (4=1080p, 7=720p, 12=4K).
+            resolution: GoPro resolution code (7=720p, 12=1080p).
             fov: GoPro FOV code, or None to keep current.
 
         Returns:
