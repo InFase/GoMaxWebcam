@@ -302,9 +302,10 @@ class AppController:
     def resume_webcam(self):
         """Resume streaming after a pause or charge mode.
 
-        From PAUSED: instant resume — just unfreeze the pipeline. ffmpeg
-        and the GoPro stream are still running.
-        From CHARGE_MODE: full restart (GoPro stream was stopped).
+        From PAUSED: restarts GoPro stream and ffmpeg. The IDLE workaround
+        is skipped (intentional stop flag) for faster restart.
+        From CHARGE_MODE: full restart with 2s settle time (exit_webcam
+        was called, camera needs time to re-enter webcam mode).
         """
         if self.state not in (AppState.PAUSED, AppState.CHARGE_MODE):
             log.warning("[EVENT:resume] Cannot resume — not paused (state=%s)", self.state.name)
