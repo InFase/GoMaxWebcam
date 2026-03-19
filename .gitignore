@@ -30,9 +30,10 @@ config.json
 
 # Release artifacts
 *.zip
+dist_final/
 
-# Claude Code prompt files
+# Internal / AI workflow files
+CLAUDE.md
 GoProBridge_ClaudeCode_Prompt.md
-
-# Design docs (internal)
 docs/superpowers/
+test_live.py
