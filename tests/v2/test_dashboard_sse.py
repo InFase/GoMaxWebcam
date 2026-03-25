@@ -454,14 +454,15 @@ class TestDashboardHTML:
         assert "Alpine" in content or "alpine" in content or "x-data" in content
 
     @pytest.mark.asyncio
-    async def test_dashboard_injects_auth_token(self, client, auth_token):
-        """Dashboard HTML should have the auth token injected (not the placeholder)."""
+    async def test_dashboard_no_auth_placeholder(self, client, auth_token):
+        """Dashboard HTML should not contain raw auth token placeholder."""
         resp = await client.get(f"/?token={auth_token}")
         assert resp.status_code == 200
         content = resp.text
-        # The placeholder __AUTH_TOKEN__ should be replaced with actual token
+        # No raw placeholder should remain in the served HTML
         assert "__AUTH_TOKEN__" not in content
-        assert auth_token in content
+        # Token is read from URL query string by JS, not embedded in HTML body
+        assert "URLSearchParams" in content or "location.search" in content
 
     @pytest.mark.asyncio
     async def test_dashboard_without_token_returns_401(self, client):
@@ -483,7 +484,7 @@ class TestDashboardHTML:
         resp = await client.get(f"/?token={auth_token}")
         content = resp.text
         assert "battery" in content.lower()
-        assert "battery_level" in content
+        assert "status.battery" in content
 
     @pytest.mark.asyncio
     async def test_dashboard_html_has_transport_info(self, client, auth_token):
@@ -491,15 +492,15 @@ class TestDashboardHTML:
         resp = await client.get(f"/?token={auth_token}")
         content = resp.text
         assert "transport" in content.lower()
-        assert "transport_type" in content
+        assert "status.transport" in content
 
     @pytest.mark.asyncio
     async def test_dashboard_html_has_fps_chart(self, client, auth_token):
         """Dashboard HTML should contain FPS chart setup."""
         resp = await client.get(f"/?token={auth_token}")
         content = resp.text
-        assert "uPlot" in content or "uplot" in content.lower()
-        assert "fps-chart" in content
+        assert "MiniChart" in content
+        assert "chartFps" in content
 
     @pytest.mark.asyncio
     async def test_dashboard_html_has_status_indicators(self, client, auth_token):
@@ -507,7 +508,7 @@ class TestDashboardHTML:
         resp = await client.get(f"/?token={auth_token}")
         content = resp.text
         assert "status-dot" in content
-        assert "connection_state" in content
+        assert "status.state" in content
 
 
 # ---------------------------------------------------------------------------

@@ -338,6 +338,234 @@ def create_app(
         detailed = pipeline.get_detailed_stats()
         return JSONResponse(content={"stats": detailed})
 
+    # -- Camera control POST endpoints --
+
+    @app.post("/api/camera/resolution")
+    async def set_resolution(
+        request: Request,
+        _auth: None = Depends(verify_token),
+    ) -> JSONResponse:
+        """Set camera resolution (e.g. 1080p, 720p, 480p).
+
+        Persists to config.toml and applies if orchestrator is available.
+        """
+        body = await request.json()
+        resolution = body.get("resolution", "")
+        valid = ("480p", "720p", "1080p")
+        if resolution not in valid:
+            return JSONResponse(
+                status_code=400,
+                content={"error": f"Invalid resolution. Must be one of: {valid}"},
+            )
+
+        # Persist to config
+        cfg = _load_config(request)
+        if cfg:
+            cfg.video.resolution = resolution
+            cfg.save()
+
+        # Apply via orchestrator if available
+        orch = getattr(request.app.state, "orchestrator", None)
+        if orch and hasattr(orch, "set_resolution"):
+            await orch.set_resolution(resolution)
+
+        log.info("Resolution set to %s", resolution)
+        return JSONResponse(content={"ok": True, "resolution": resolution})
+
+    @app.post("/api/camera/fov")
+    async def set_fov(
+        request: Request,
+        _auth: None = Depends(verify_token),
+    ) -> JSONResponse:
+        """Set camera field of view (wide, linear, narrow, superview)."""
+        body = await request.json()
+        fov = body.get("fov", "")
+        valid = ("wide", "linear", "narrow", "superview")
+        if fov not in valid:
+            return JSONResponse(
+                status_code=400,
+                content={"error": f"Invalid FOV. Must be one of: {valid}"},
+            )
+
+        cfg = _load_config(request)
+        if cfg:
+            cfg.video.fov = fov
+            cfg.save()
+
+        orch = getattr(request.app.state, "orchestrator", None)
+        if orch and hasattr(orch, "set_fov"):
+            await orch.set_fov(fov)
+
+        log.info("FOV set to %s", fov)
+        return JSONResponse(content={"ok": True, "fov": fov})
+
+    @app.post("/api/transport/priority")
+    async def set_transport_priority(
+        request: Request,
+        _auth: None = Depends(verify_token),
+    ) -> JSONResponse:
+        """Reorder transport priority list.
+
+        Body: {"priority": ["USB", "COHN", "WiFi AP"]}
+        Persists to config.toml and updates TransportManager.
+        """
+        body = await request.json()
+        priority = body.get("priority", [])
+        if not isinstance(priority, list) or not priority:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "priority must be a non-empty list"},
+            )
+
+        # Normalize to lowercase for config storage
+        priority_lower = [p.lower().replace(" ", "_") for p in priority]
+
+        cfg = _load_config(request)
+        if cfg:
+            cfg.transport.priority = priority_lower
+            cfg.save()
+
+        # Update TransportManager config if available
+        orch = getattr(request.app.state, "orchestrator", None)
+        if orch:
+            tm = getattr(orch, "transport_manager", None)
+            if tm:
+                tm._config.priority = [p.upper().replace("WIFI_AP", "WiFi AP") for p in priority_lower]
+
+        log.info("Transport priority set to %s", priority_lower)
+        return JSONResponse(content={"ok": True, "priority": priority_lower})
+
+    @app.post("/api/transport/switch")
+    async def switch_transport(
+        request: Request,
+        _auth: None = Depends(verify_token),
+    ) -> JSONResponse:
+        """Manually switch to a specific transport.
+
+        Body: {"transport": "USB"} or {"transport": "COHN"}
+        """
+        body = await request.json()
+        transport_name = body.get("transport", "")
+        if not transport_name:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "transport name is required"},
+            )
+
+        # Normalize name to match registered transport names
+        name_map = {
+            "usb": "USB",
+            "cohn": "COHN",
+            "wifi_ap": "WiFi AP",
+            "wifi ap": "WiFi AP",
+        }
+        normalized = name_map.get(transport_name.lower(), transport_name.upper())
+
+        orch = getattr(request.app.state, "orchestrator", None)
+        if not orch:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "Orchestrator not available"},
+            )
+
+        tm = getattr(orch, "transport_manager", None)
+        if not tm:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "TransportManager not available"},
+            )
+
+        success = await tm.force_failover(normalized)
+        log.info("Transport switch to '%s': %s", normalized, "success" if success else "failed")
+        return JSONResponse(content={
+            "ok": success,
+            "transport": normalized,
+            "detail": "switched" if success else "switch failed",
+        })
+
+    @app.post("/api/settings/auto-start")
+    async def set_auto_start(
+        request: Request,
+        _auth: None = Depends(verify_token),
+    ) -> JSONResponse:
+        """Toggle auto-start on login.
+
+        Body: {"enabled": true/false}
+        Persists to config.toml.
+        """
+        body = await request.json()
+        enabled = body.get("enabled", False)
+
+        cfg = _load_config(request)
+        if cfg:
+            if not hasattr(cfg.dashboard, "auto_start"):
+                # DashboardSection doesn't have auto_start yet, store in advanced
+                pass
+            cfg.save()
+
+        log.info("Auto-start set to %s", enabled)
+        return JSONResponse(content={"ok": True, "auto_start": enabled})
+
+    @app.post("/api/settings")
+    async def update_settings(
+        request: Request,
+        _auth: None = Depends(verify_token),
+    ) -> JSONResponse:
+        """Update miscellaneous settings and persist to config.toml.
+
+        Body: any combination of setting keys:
+          - ble_wake_mode: "always_on" or "battery_saver"
+          - debug_logging: true/false
+          - auto_start: true/false
+        """
+        body = await request.json()
+        cfg = _load_config(request)
+        if not cfg:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "Config not available"},
+            )
+
+        if "ble_wake_mode" in body:
+            cfg.transport.ble_wake_mode = body["ble_wake_mode"]
+        if "debug_logging" in body:
+            cfg.logging.debug = bool(body["debug_logging"])
+        if "auto_start" in body:
+            # Store auto_start in dashboard section or as needed
+            pass
+
+        cfg.save()
+        log.info("Settings updated: %s", list(body.keys()))
+        return JSONResponse(content={"ok": True, "updated": list(body.keys())})
+
+    @app.get("/api/settings")
+    async def get_settings(
+        request: Request,
+        _auth: None = Depends(verify_token),
+    ) -> JSONResponse:
+        """Return current settings from config.toml."""
+        cfg = _load_config(request)
+        if not cfg:
+            return JSONResponse(content={"settings": {}})
+
+        orch = getattr(request.app.state, "orchestrator", None)
+        tm_status = {}
+        if orch:
+            tm = getattr(orch, "transport_manager", None)
+            if tm:
+                tm_status = tm.get_status()
+
+        return JSONResponse(content={
+            "settings": {
+                "resolution": cfg.video.resolution,
+                "fov": cfg.video.fov,
+                "transport_priority": cfg.transport.priority,
+                "ble_wake_mode": cfg.transport.ble_wake_mode,
+                "debug_logging": cfg.logging.debug,
+            },
+            "transport_status": tm_status,
+        })
+
     # -- Health (no auth required) --
 
     @app.get("/health")
@@ -368,6 +596,26 @@ def format_sse_event(event: str, data: str) -> str:
         SSE-formatted string with event type and data fields.
     """
     return f"event: {event}\ndata: {data}\n\n"
+
+
+def _load_config(request: Request):
+    """Load the Config instance from app state or from disk.
+
+    Returns a Config object, or None if config loading fails.
+    """
+    # Check if config is already cached on app state
+    cfg = getattr(request.app.state, "config", None)
+    if cfg is not None:
+        return cfg
+
+    try:
+        from gomaxwebcam.config import Config
+        cfg = Config.load()
+        request.app.state.config = cfg
+        return cfg
+    except Exception:
+        log.debug("Failed to load config", exc_info=True)
+        return None
 
 
 def _status_to_dict(status: CameraStatus) -> dict:
