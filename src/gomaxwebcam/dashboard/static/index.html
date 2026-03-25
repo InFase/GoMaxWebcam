@@ -1,0 +1,1162 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GoMaxWebcam Dashboard</title>
+
+<!-- Pico CSS (dark theme) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+
+<style>
+/* ── Base overrides ── */
+:root {
+  --status-streaming: #22c55e;
+  --status-connecting: #eab308;
+  --status-error: #ef4444;
+  --status-paused: #6b7280;
+  --pico-background-color: #111318;
+  --pico-card-background-color: #181b20;
+  --pico-card-border-color: #2a2d35;
+}
+body { padding-bottom: 2rem; }
+
+/* ── Status indicator dot ── */
+.status-dot {
+  display: inline-block;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  margin-right: 0.5rem;
+  vertical-align: middle;
+  background: var(--status-paused);
+}
+.status-dot[data-state="streaming"]  { background: var(--status-streaming); box-shadow: 0 0 6px var(--status-streaming); }
+.status-dot[data-state="connecting"] { background: var(--status-connecting); box-shadow: 0 0 6px var(--status-connecting); }
+.status-dot[data-state="error"]      { background: var(--status-error); box-shadow: 0 0 6px var(--status-error); }
+.status-dot[data-state="paused"]     { background: var(--status-paused); }
+
+/* ── Status grid ── */
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 0.75rem;
+}
+.status-grid .stat-box {
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+.stat-box .label { font-size: 0.75rem; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em; }
+.stat-box .value { font-size: 1.1rem; font-weight: 600; margin-top: 0.15rem; }
+
+/* ── Transport priority list ── */
+.transport-list {
+  list-style: none; padding: 0; margin: 0;
+}
+.transport-list li {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 6px;
+  margin-bottom: 0.35rem;
+}
+.transport-list li .handle { margin-right: 0.5rem; color: #6b7280; }
+.transport-list li.active { border-color: var(--status-streaming); }
+
+/* ── Chart containers ── */
+.chart-wrap {
+  position: relative;
+  width: 100%;
+  height: 180px;
+  background: #0d0f12;
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+.chart-wrap canvas { width: 100%; height: 100%; display: block; }
+.chart-title {
+  position: absolute; top: 6px; left: 10px;
+  font-size: 0.7rem; color: #6b7280; text-transform: uppercase; letter-spacing: 0.04em;
+  pointer-events: none; z-index: 1;
+}
+
+/* ── Wizard modal ── */
+.wizard-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+}
+.wizard-modal {
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--pico-card-border-color);
+  border-radius: 12px;
+  padding: 2rem; width: 90%; max-width: 520px;
+  max-height: 85vh; overflow-y: auto;
+}
+.wizard-modal h3 { margin-top: 0; }
+.wizard-progress { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+.wizard-progress .step {
+  flex: 1; height: 4px; border-radius: 2px; background: #2a2d35;
+  transition: background 0.3s ease;
+}
+.wizard-progress .step.done { background: var(--status-streaming); }
+.wizard-progress .step.active { background: var(--status-connecting); }
+.wizard-progress .step.error { background: var(--status-error); }
+
+/* Step labels */
+.wizard-step-labels { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+.wizard-step-labels .step-label {
+  flex: 1; text-align: center; font-size: 0.65rem;
+  color: #6b7280; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.wizard-step-labels .step-label.active { color: var(--status-connecting); font-weight: 600; }
+.wizard-step-labels .step-label.done { color: var(--status-streaming); }
+
+/* Camera list */
+.wizard-camera-list { list-style: none; padding: 0; margin: 0.75rem 0; }
+.wizard-camera-list li {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.6rem 0.75rem; margin-bottom: 0.35rem;
+  background: #0d0f12; border: 1px solid var(--pico-card-border-color);
+  border-radius: 8px; cursor: pointer; transition: border-color 0.2s;
+}
+.wizard-camera-list li:hover { border-color: var(--status-connecting); }
+.wizard-camera-list li.selected { border-color: var(--status-streaming); background: #0f1a12; }
+.wizard-camera-list li .cam-name { font-weight: 500; }
+.wizard-camera-list li .cam-rssi { font-size: 0.75rem; color: #6b7280; }
+.wizard-camera-list li .cam-rssi-bar {
+  display: inline-block; width: 40px; height: 10px;
+  background: #2a2d35; border-radius: 3px; overflow: hidden;
+  vertical-align: middle; margin-left: 0.5rem;
+}
+.wizard-camera-list li .cam-rssi-fill {
+  height: 100%; border-radius: 3px; transition: width 0.3s;
+}
+
+/* Progress bar */
+.wizard-provision-progress {
+  width: 100%; height: 8px; background: #2a2d35;
+  border-radius: 4px; overflow: hidden; margin: 1rem 0;
+}
+.wizard-provision-progress .fill {
+  height: 100%; background: var(--status-connecting);
+  border-radius: 4px; transition: width 0.4s ease;
+}
+.wizard-provision-progress .fill.complete { background: var(--status-streaming); }
+.wizard-provision-progress .fill.error { background: var(--status-error); }
+
+/* Status message */
+.wizard-status-msg {
+  font-size: 0.85rem; color: #9ca3af;
+  padding: 0.5rem 0; min-height: 1.5em;
+}
+
+/* Error/success boxes */
+.wizard-error {
+  background: rgba(239,68,68,0.1); border: 1px solid var(--status-error);
+  border-radius: 8px; padding: 0.75rem 1rem; margin: 0.75rem 0;
+  color: #fca5a5; font-size: 0.85rem;
+}
+.wizard-success {
+  background: rgba(34,197,94,0.1); border: 1px solid var(--status-streaming);
+  border-radius: 8px; padding: 0.75rem 1rem; margin: 0.75rem 0;
+  color: #86efac; font-size: 0.85rem;
+}
+.wizard-success .detail { color: #9ca3af; font-size: 0.8rem; margin-top: 0.35rem; }
+
+/* Spinner animation */
+@keyframes wizard-spin { to { transform: rotate(360deg); } }
+.wizard-spinner {
+  display: inline-block; width: 16px; height: 16px;
+  border: 2px solid #2a2d35; border-top-color: var(--status-connecting);
+  border-radius: 50%; animation: wizard-spin 0.8s linear infinite;
+  vertical-align: middle; margin-right: 0.5rem;
+}
+
+/* ── Misc ── */
+section { margin-bottom: 1.5rem; }
+.inline-group { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: end; }
+.btn-sm { padding: 0.35rem 0.75rem; font-size: 0.85rem; }
+.frame-drop-counter { font-size: 1.4rem; font-weight: 700; color: var(--status-error); }
+.health-badge { font-size: 0.75rem; font-weight: 600; padding: 0.15rem 0.5rem; border-radius: 1rem; text-transform: uppercase; vertical-align: middle; margin-left: 0.5rem; }
+.health-healthy { background: #16a34a; color: #fff; }
+.health-degraded { background: #eab308; color: #000; }
+.health-unhealthy { background: #dc2626; color: #fff; }
+.health-unknown { background: #64748b; color: #fff; }
+.stat-box { background: var(--card-background-color); padding: 0.4rem 0.6rem; border-radius: 0.3rem; text-align: center; }
+.stat-box small { display: block; opacity: 0.6; font-size: 0.7rem; }
+.stat-box span { font-weight: 600; font-size: 0.95rem; }
+.muted { color: #6b7280; }
+</style>
+</head>
+
+<body x-data="dashboard()" x-init="init()">
+<main class="container">
+
+  <header style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;">
+    <h1 style="margin:0;font-size:1.5rem;">GoMaxWebcam</h1>
+    <small class="muted" x-text="'v2 | up ' + uptime"></small>
+  </header>
+
+  <!-- ═══════════════════════════════════════════
+       1. STATUS PANEL
+       ═══════════════════════════════════════════ -->
+  <section>
+    <h4>
+      <span class="status-dot" :data-state="status.state"></span>
+      <span x-text="status.state_label"></span>
+    </h4>
+    <div class="status-grid">
+      <div class="stat-box">
+        <div class="label">Camera</div>
+        <div class="value" x-text="status.camera_model || '--'"></div>
+      </div>
+      <div class="stat-box">
+        <div class="label">Battery</div>
+        <div class="value" x-text="status.battery != null ? status.battery + '%' : '--'"></div>
+      </div>
+      <div class="stat-box">
+        <div class="label">Resolution</div>
+        <div class="value" x-text="status.resolution || '--'"></div>
+      </div>
+      <div class="stat-box">
+        <div class="label">Transport</div>
+        <div class="value" x-text="status.transport || '--'"></div>
+      </div>
+      <div class="stat-box">
+        <div class="label">Uptime</div>
+        <div class="value" x-text="uptime"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════
+       2. CAMERA CONTROLS
+       ═══════════════════════════════════════════ -->
+  <section>
+    <h4>Camera Controls</h4>
+    <div class="inline-group">
+      <label>
+        Resolution
+        <select x-model="controls.resolution" @change="setResolution()">
+          <option value="480p">480p 16:9 30fps</option>
+          <option value="720p">720p 16:9 30fps</option>
+          <option value="1080p">1080p 16:9 30fps</option>
+        </select>
+      </label>
+      <label>
+        FOV
+        <select x-model="controls.fov" @change="setFov()">
+          <option value="wide">Wide</option>
+          <option value="linear">Linear</option>
+          <option value="narrow">Narrow</option>
+          <option value="superview">SuperView</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════
+       3. TRANSPORT
+       ═══════════════════════════════════════════ -->
+  <section>
+    <h4>Transport</h4>
+    <div class="grid">
+      <div>
+        <h6 class="muted">Priority Order</h6>
+        <ul class="transport-list">
+          <template x-for="(t, i) in transport.priority" :key="t">
+            <li :class="{ active: t === status.transport }">
+              <span>
+                <span class="handle">&#x2630;</span>
+                <span x-text="t"></span>
+              </span>
+              <span>
+                <button class="btn-sm outline" :disabled="i === 0" @click="moveTransport(i, -1)">&uarr;</button>
+                <button class="btn-sm outline" :disabled="i === transport.priority.length - 1" @click="moveTransport(i, 1)">&darr;</button>
+              </span>
+            </li>
+          </template>
+        </ul>
+      </div>
+      <div>
+        <h6 class="muted">Manual Switch</h6>
+        <div class="inline-group">
+          <button class="btn-sm" @click="switchTransport('usb')">USB</button>
+          <button class="btn-sm" @click="switchTransport('cohn')">COHN</button>
+          <button class="btn-sm" @click="switchTransport('wifi_ap')">WiFi AP</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════
+       4. DIAGNOSTICS
+       ═══════════════════════════════════════════ -->
+  <section>
+    <h4>Diagnostics
+      <span class="health-badge"
+            :class="{ 'health-healthy': diagnostics.health === 'healthy',
+                       'health-degraded': diagnostics.health === 'degraded',
+                       'health-unhealthy': diagnostics.health === 'unhealthy',
+                       'health-unknown': diagnostics.health === 'unknown' }"
+            x-text="diagnostics.health"></span>
+    </h4>
+    <div class="chart-wrap">
+      <span class="chart-title">Decode Time (ms)</span>
+      <canvas x-ref="chartDecode"></canvas>
+    </div>
+    <div class="chart-wrap">
+      <span class="chart-title">Pipeline FPS</span>
+      <canvas x-ref="chartFps"></canvas>
+    </div>
+    <div class="stats-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.5rem;margin:.5rem 0;">
+      <div class="stat-box">
+        <small>Avg Decode</small>
+        <span x-text="diagnostics.avg_decode_ms.toFixed(1) + ' ms'"></span>
+      </div>
+      <div class="stat-box">
+        <small>Jitter</small>
+        <span x-text="diagnostics.avg_jitter_ms.toFixed(1) + ' ms'"></span>
+      </div>
+      <div class="stat-box">
+        <small>Drop Rate</small>
+        <span x-text="(diagnostics.drop_rate * 100).toFixed(2) + '%'"></span>
+      </div>
+    </div>
+    <p>
+      Frame Drops: <span class="frame-drop-counter" x-text="diagnostics.frame_drops"></span>
+    </p>
+  </section>
+
+  <!-- ═══════════════════════════════════════════
+       5. SETTINGS
+       ═══════════════════════════════════════════ -->
+  <section>
+    <h4>Settings</h4>
+    <label>
+      <input type="checkbox" role="switch" x-model="settings.ble_always_on" @change="saveSetting('ble_wake_mode', settings.ble_always_on ? 'always_on' : 'battery_saver')">
+      BLE Wake: Always-On
+    </label>
+    <label>
+      <input type="checkbox" role="switch" x-model="settings.debug_logging" @change="saveSetting('debug_logging', settings.debug_logging)">
+      Debug Logging
+    </label>
+    <button class="btn-sm outline" @click="exportDiagnostics()">Export Diagnostics</button>
+  </section>
+
+  <!-- ═══════════════════════════════════════════
+       6. SETUP WIZARD (modal)
+       ═══════════════════════════════════════════ -->
+  <template x-if="wizard.show">
+    <div class="wizard-backdrop" @click.self="wizardClose()">
+      <div class="wizard-modal">
+
+        <!-- Header with close button -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;">
+          <h3 style="margin:0;">COHN Setup Wizard</h3>
+          <button class="outline btn-sm" @click="wizardClose()" style="padding:0.2rem 0.5rem;border:none;">&times;</button>
+        </div>
+
+        <!-- Step progress bar -->
+        <div class="wizard-progress">
+          <template x-for="s in 4">
+            <div class="step" :class="{
+              done: wizard.step > s,
+              active: wizard.step === s,
+              error: wizard.step === s && wizard.error
+            }"></div>
+          </template>
+        </div>
+
+        <!-- Step labels -->
+        <div class="wizard-step-labels">
+          <span class="step-label" :class="{ active: wizard.step === 1, done: wizard.step > 1 }">1. Scan</span>
+          <span class="step-label" :class="{ active: wizard.step === 2, done: wizard.step > 2 }">2. Select</span>
+          <span class="step-label" :class="{ active: wizard.step === 3, done: wizard.step > 3 }">3. Provision</span>
+          <span class="step-label" :class="{ active: wizard.step === 4, done: wizard.step > 4 }">4. Confirm</span>
+        </div>
+
+        <!-- ── Step 1: BLE Scan ── -->
+        <div x-show="wizard.step === 1">
+          <p style="margin-bottom:0.75rem;">Scan for GoPro cameras via Bluetooth. Make sure your camera is powered on and nearby.</p>
+
+          <div class="inline-group" style="margin-bottom:0.75rem;">
+            <label style="flex:1;">
+              Scan timeout
+              <select x-model="wizard.scan_timeout" style="margin-bottom:0;">
+                <option value="5">5 seconds</option>
+                <option value="10" selected>10 seconds</option>
+                <option value="20">20 seconds</option>
+              </select>
+            </label>
+            <button @click="wizardScan()" :disabled="wizard.scanning" style="align-self:end;">
+              <span x-show="wizard.scanning" class="wizard-spinner"></span>
+              <span x-text="wizard.scanning ? 'Scanning...' : 'Scan for Cameras'"></span>
+            </button>
+          </div>
+
+          <!-- Error display -->
+          <div x-show="wizard.error" class="wizard-error" x-text="wizard.error"></div>
+
+          <!-- Scan results -->
+          <div x-show="wizard.cameras.length > 0">
+            <p class="muted" style="font-size:0.8rem;" x-text="'Found ' + wizard.cameras.length + ' camera(s). Click to select.'"></p>
+            <ul class="wizard-camera-list">
+              <template x-for="cam in wizard.cameras" :key="cam.address">
+                <li @click="wizardSelectCamera(cam)" :class="{ selected: wizard.selected && wizard.selected.address === cam.address }">
+                  <div>
+                    <span class="cam-name" x-text="cam.name"></span>
+                    <br>
+                    <small class="muted" x-text="cam.address"></small>
+                  </div>
+                  <div style="text-align:right;">
+                    <span class="cam-rssi" x-text="cam.rssi + ' dBm'"></span>
+                    <div class="cam-rssi-bar">
+                      <div class="cam-rssi-fill" :style="'width:' + Math.max(0, Math.min(100, (cam.rssi + 100) * 1.5)) + '%;background:' + (cam.rssi > -60 ? 'var(--status-streaming)' : cam.rssi > -80 ? 'var(--status-connecting)' : 'var(--status-error)')"></div>
+                    </div>
+                  </div>
+                </li>
+              </template>
+            </ul>
+          </div>
+
+          <!-- No cameras found -->
+          <div x-show="wizard.scan_done && wizard.cameras.length === 0 && !wizard.error" class="wizard-error">
+            No GoPro cameras found. Ensure the camera is on, Bluetooth is enabled, and the camera is nearby.
+          </div>
+
+          <!-- Next button (after selecting a camera) -->
+          <button x-show="wizard.selected" @click="wizardConfirmSelect()" style="margin-top:0.5rem;">
+            Continue with <span x-text="wizard.selected ? wizard.selected.name : ''"></span> &rarr;
+          </button>
+        </div>
+
+        <!-- ── Step 2: Camera Selection Confirmation ── -->
+        <div x-show="wizard.step === 2">
+          <p>Camera selected for COHN provisioning:</p>
+
+          <div style="background:#0d0f12;border:1px solid var(--pico-card-border-color);border-radius:8px;padding:1rem;margin:0.75rem 0;">
+            <div style="font-weight:600;font-size:1.1rem;" x-text="wizard.selected ? wizard.selected.name : '--'"></div>
+            <div class="muted" style="font-size:0.85rem;margin-top:0.25rem;" x-text="wizard.selected ? wizard.selected.address : ''"></div>
+            <div class="muted" style="font-size:0.8rem;margin-top:0.15rem;" x-text="wizard.selected ? wizard.selected.rssi + ' dBm signal' : ''"></div>
+          </div>
+
+          <!-- Error display -->
+          <div x-show="wizard.error" class="wizard-error" x-text="wizard.error"></div>
+
+          <p style="font-size:0.85rem;color:#9ca3af;">Next, you will provide your home WiFi credentials so the camera can connect to your network for COHN (Camera on Home Network) streaming.</p>
+
+          <div class="inline-group">
+            <button class="outline" @click="wizard.step = 1; wizard.error = '';">&larr; Back</button>
+            <button @click="wizard.step = 3; wizard.error = '';">Continue to WiFi Setup &rarr;</button>
+          </div>
+        </div>
+
+        <!-- ── Step 3: WiFi Credentials + Provisioning ── -->
+        <div x-show="wizard.step === 3">
+
+          <!-- WiFi input form (before provisioning starts) -->
+          <div x-show="!wizard.provisioning && wizard.phase !== 'complete' && wizard.phase !== 'failed'">
+            <p>Enter your home WiFi credentials. The camera will connect to this network.</p>
+
+            <label>
+              WiFi Network (SSID)
+              <input type="text" x-model="wizard.wifi_ssid" placeholder="Your network name" :disabled="wizard.provisioning" autocomplete="off">
+            </label>
+            <label>
+              WiFi Password
+              <div style="position:relative;">
+                <input :type="wizard.show_pass ? 'text' : 'password'" x-model="wizard.wifi_pass" placeholder="Network password" :disabled="wizard.provisioning" autocomplete="off">
+                <button type="button" class="outline btn-sm" @click="wizard.show_pass = !wizard.show_pass" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);border:none;padding:0.2rem 0.4rem;" x-text="wizard.show_pass ? 'Hide' : 'Show'"></button>
+              </div>
+            </label>
+
+            <!-- Error display -->
+            <div x-show="wizard.error" class="wizard-error" x-text="wizard.error"></div>
+
+            <div class="inline-group">
+              <button class="outline" @click="wizard.step = 2; wizard.error = '';">&larr; Back</button>
+              <button @click="wizardProvision()" :disabled="!wizard.wifi_ssid || !wizard.wifi_pass">
+                Start Provisioning
+              </button>
+            </div>
+          </div>
+
+          <!-- Provisioning in progress -->
+          <div x-show="wizard.provisioning">
+            <p style="font-weight:500;">
+              <span class="wizard-spinner"></span>
+              Provisioning COHN...
+            </p>
+
+            <div class="wizard-provision-progress">
+              <div class="fill" :style="'width:' + wizard.progress_pct + '%'"></div>
+            </div>
+
+            <div class="wizard-status-msg" x-text="wizard.status_msg || 'Starting...'"></div>
+
+            <div style="font-size:0.75rem;color:#6b7280;margin-top:0.5rem;">
+              <span x-text="'Camera: ' + (wizard.selected ? wizard.selected.name : '--')"></span> |
+              <span x-text="'WiFi: ' + wizard.wifi_ssid"></span> |
+              <span x-text="'Elapsed: ' + wizard.elapsed_s + 's'"></span>
+            </div>
+
+            <button class="outline btn-sm" @click="wizardCancel()" style="margin-top:1rem;">Cancel Provisioning</button>
+          </div>
+
+          <!-- Provisioning failed -->
+          <div x-show="!wizard.provisioning && wizard.phase === 'failed'">
+            <div class="wizard-error">
+              <strong>Provisioning Failed</strong><br>
+              <span x-text="wizard.error || 'An unknown error occurred.'"></span>
+            </div>
+            <div class="inline-group" style="margin-top:0.75rem;">
+              <button class="outline" @click="wizardResetProvision()">&larr; Try Again</button>
+              <button class="outline" @click="wizardClose()">Close</button>
+            </div>
+          </div>
+
+          <!-- Provisioning complete (auto-advance to step 4) -->
+          <div x-show="!wizard.provisioning && wizard.phase === 'complete'">
+            <div class="wizard-success">
+              Provisioning complete! Verifying credentials...
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Step 4: Confirmation ── -->
+        <div x-show="wizard.step === 4">
+
+          <!-- Confirming -->
+          <div x-show="wizard.confirming">
+            <p><span class="wizard-spinner"></span> Verifying COHN credentials...</p>
+          </div>
+
+          <!-- Confirmed successfully -->
+          <div x-show="!wizard.confirming && wizard.confirmed">
+            <div class="wizard-success">
+              <strong>COHN Setup Complete!</strong>
+              <div class="detail">
+                Your GoPro is now accessible on your home network via COHN.
+              </div>
+            </div>
+
+            <div style="background:#0d0f12;border:1px solid var(--pico-card-border-color);border-radius:8px;padding:1rem;margin:0.75rem 0;">
+              <div style="display:grid;grid-template-columns:auto 1fr;gap:0.3rem 1rem;font-size:0.85rem;">
+                <span class="muted">Camera:</span>
+                <span x-text="wizard.confirm_data.camera_name || wizard.selected?.name || '--'"></span>
+                <span class="muted">IP Address:</span>
+                <span style="font-family:monospace;" x-text="wizard.confirm_data.camera_ip || '--'"></span>
+                <span class="muted">COHN User:</span>
+                <span style="font-family:monospace;" x-text="wizard.confirm_data.cohn_username || '--'"></span>
+                <span class="muted">Serial:</span>
+                <span style="font-family:monospace;" x-text="wizard.confirm_data.camera_serial || '--'"></span>
+              </div>
+            </div>
+
+            <p style="font-size:0.85rem;color:#9ca3af;">
+              The COHN transport will now be available as a failover option. Credentials are stored by open-gopro.
+            </p>
+
+            <button @click="wizardClose()">Done</button>
+          </div>
+
+          <!-- Confirmation failed -->
+          <div x-show="!wizard.confirming && !wizard.confirmed && wizard.error">
+            <div class="wizard-error">
+              <strong>Credential Verification Failed</strong><br>
+              <span x-text="wizard.error"></span>
+            </div>
+            <div class="inline-group" style="margin-top:0.75rem;">
+              <button class="outline" @click="wizardConfirm()">Retry Verification</button>
+              <button class="outline" @click="wizardResetProvision()">Re-provision</button>
+              <button class="outline" @click="wizardClose()">Close</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </template>
+
+  <footer style="text-align:center;margin-top:2rem;">
+    <button class="outline btn-sm" @click="wizardOpen()">COHN Setup Wizard</button>
+  </footer>
+
+</main>
+
+<!-- ── htmx + SSE extension ── -->
+<script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
+<script src="https://unpkg.com/htmx-ext-sse@2.3.0/sse.js"></script>
+
+<!-- ── Alpine.js ── -->
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+
+<script>
+/**
+ * Minimal auto-scrolling line chart rendered on a <canvas>.
+ * Replaces uPlot for offline-capable usage (no CDN dependency).
+ * Shows a 30-minute rolling window (1800 data points at 1 pt/sec).
+ */
+class MiniChart {
+  constructor(canvas, opts) {
+    opts = opts || {};
+    this.canvas = canvas;
+    this.color = opts.color || '#22c55e';
+    this.maxPoints = opts.maxPoints || 1800;
+    this.data = [];
+    this.min = opts.min != null ? opts.min : 0;
+    this.max = opts.max != null ? opts.max : 100;
+    this.autoScale = opts.autoScale !== false;
+    this._resize();
+    this._ro = new ResizeObserver(function () { this._resize(); }.bind(this));
+    this._ro.observe(canvas.parentElement);
+  }
+
+  _resize() {
+    var r = this.canvas.parentElement.getBoundingClientRect();
+    this.canvas.width = r.width * devicePixelRatio;
+    this.canvas.height = r.height * devicePixelRatio;
+    this.canvas.style.width = r.width + 'px';
+    this.canvas.style.height = r.height + 'px';
+    this.draw();
+  }
+
+  push(value) {
+    this.data.push(value);
+    if (this.data.length > this.maxPoints) this.data.shift();
+    if (this.autoScale && this.data.length > 0) {
+      var lo = this.data[0], hi = this.data[0];
+      for (var i = 1; i < this.data.length; i++) {
+        if (this.data[i] < lo) lo = this.data[i];
+        if (this.data[i] > hi) hi = this.data[i];
+      }
+      this.min = lo * 0.9;
+      this.max = (hi * 1.1) || 1;
+    }
+    this.draw();
+  }
+
+  draw() {
+    var ctx = this.canvas.getContext('2d');
+    var W = this.canvas.width, H = this.canvas.height;
+    var dpr = devicePixelRatio;
+    ctx.clearRect(0, 0, W, H);
+
+    // Horizontal grid lines
+    ctx.strokeStyle = '#1e2028';
+    ctx.lineWidth = 1 * dpr;
+    for (var g = 0; g < 5; g++) {
+      var gy = (H / 5) * g;
+      ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
+    }
+
+    // Y-axis labels
+    ctx.fillStyle = '#4b5563';
+    ctx.font = (10 * dpr) + 'px sans-serif';
+    for (var j = 0; j <= 4; j++) {
+      var val = this.max - (this.max - this.min) * (j / 4);
+      ctx.fillText(val.toFixed(1), 4 * dpr, (H / 4) * j + 12 * dpr);
+    }
+
+    if (this.data.length < 2) return;
+
+    var padTop = 20 * dpr, padBot = 10 * dpr;
+    var plotH = H - padTop - padBot;
+    var step = W / (this.maxPoints - 1);
+    var startX = W - (this.data.length - 1) * step;
+    var range = this.max - this.min || 1;
+
+    ctx.beginPath();
+    ctx.strokeStyle = this.color;
+    ctx.lineWidth = 1.5 * dpr;
+    ctx.lineJoin = 'round';
+
+    for (var k = 0; k < this.data.length; k++) {
+      var x = startX + k * step;
+      var norm = (this.data[k] - this.min) / range;
+      var y = padTop + plotH * (1 - norm);
+      if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Semi-transparent fill under line
+    var lastX = startX + (this.data.length - 1) * step;
+    ctx.lineTo(lastX, H);
+    ctx.lineTo(startX, H);
+    ctx.closePath();
+    ctx.fillStyle = this.color + '18';
+    ctx.fill();
+  }
+}
+
+/**
+ * GoMaxWebcam Dashboard -- Alpine.js component.
+ *
+ * Connects to SSE at /api/status/stream?token=TOKEN for live updates.
+ * Sends control actions via REST POST with Bearer token auth.
+ */
+function dashboard() {
+  var params = new URLSearchParams(location.search);
+  var TOKEN = params.get('token') || '';
+
+  function apiHeaders() {
+    var h = { 'Content-Type': 'application/json' };
+    if (TOKEN) h['Authorization'] = 'Bearer ' + TOKEN;
+    return h;
+  }
+
+  function apiPost(path, body) {
+    return fetch(path, {
+      method: 'POST',
+      headers: apiHeaders(),
+      body: JSON.stringify(body || {}),
+    }).then(function (res) {
+      if (!res.ok) console.error('API error', path, res.status);
+      return res;
+    });
+  }
+
+  return {
+    // ── Reactive state ──
+    status: {
+      state: 'paused',
+      state_label: 'Paused',
+      camera_model: null,
+      battery: null,
+      resolution: null,
+      transport: null,
+    },
+    uptime: '0s',
+    controls: { resolution: '1080p', fov: 'wide' },
+    transport: { priority: ['USB', 'COHN', 'WiFi AP'] },
+    diagnostics: { frame_drops: 0, health: 'unknown', avg_decode_ms: 0, avg_jitter_ms: 0, drop_rate: 0 },
+    settings: { ble_always_on: true, debug_logging: false },
+    wizard: {
+      show: false,
+      step: 1,
+      scanning: false,
+      scan_done: false,
+      scan_timeout: '10',
+      cameras: [],
+      selected: null,
+      wifi_ssid: '',
+      wifi_pass: '',
+      show_pass: false,
+      provisioning: false,
+      phase: 'idle',
+      progress_pct: 0,
+      status_msg: '',
+      elapsed_s: 0,
+      error: '',
+      confirming: false,
+      confirmed: false,
+      confirm_data: { camera_ip: '', cohn_username: '', camera_serial: '', camera_name: '' },
+      _progressSSE: null,
+    },
+    _charts: {},
+    _sse: null,
+    _startTime: Date.now(),
+
+    // ── Lifecycle ──
+    init() {
+      var self = this;
+      this.$nextTick(function () {
+        self._charts.decode = new MiniChart(self.$refs.chartDecode, {
+          color: '#eab308', autoScale: true, min: 0, max: 50,
+        });
+        self._charts.fps = new MiniChart(self.$refs.chartFps, {
+          color: '#22c55e', autoScale: true, min: 0, max: 60,
+        });
+      });
+      this._connectSSE();
+      setInterval(function () { self._updateUptime(); }, 1000);
+    },
+
+    // ── SSE ──
+    _connectSSE() {
+      var self = this;
+      var url = '/api/status/stream' + (TOKEN ? '?token=' + encodeURIComponent(TOKEN) : '');
+      var es = new EventSource(url);
+      this._sse = es;
+
+      es.onmessage = function (e) {
+        try { self._applyUpdate(JSON.parse(e.data)); }
+        catch (err) { console.error('SSE parse error', err); }
+      };
+      es.addEventListener('status', function (e) {
+        try { self._applyUpdate(JSON.parse(e.data)); }
+        catch (err) { console.error('SSE parse error', err); }
+      });
+      es.onerror = function () {
+        self.status.state = 'error';
+        self.status.state_label = 'Disconnected';
+        es.close();
+        setTimeout(function () { self._connectSSE(); }, 3000);
+      };
+    },
+
+    _applyUpdate(d) {
+      if (d.state !== undefined) {
+        this.status.state = d.state;
+        var labels = { streaming: 'Streaming', connecting: 'Connecting', error: 'Error', paused: 'Paused' };
+        this.status.state_label = labels[d.state] || d.state;
+      }
+      if (d.camera_model !== undefined) this.status.camera_model = d.camera_model;
+      if (d.battery !== undefined) this.status.battery = d.battery;
+      if (d.resolution !== undefined) this.status.resolution = d.resolution;
+      if (d.transport !== undefined) this.status.transport = d.transport;
+      if (d.uptime_seconds !== undefined) this._startTime = Date.now() - d.uptime_seconds * 1000;
+      if (d.frame_drops !== undefined) this.diagnostics.frame_drops = d.frame_drops;
+      // Map decoder_dropped from CameraStatus to frame_drops for display
+      if (d.decoder_frames !== undefined && d.decoder_dropped !== undefined) {
+        this.diagnostics.frame_drops = (d.decoder_dropped || 0);
+      }
+
+      // Frame metrics from enhanced CameraStatus
+      if (d.last_decode_ms !== undefined) {
+        if (this._charts.decode) this._charts.decode.push(d.last_decode_ms);
+        this.diagnostics.avg_decode_ms = d.avg_decode_ms || 0;
+      }
+      if (d.decode_time_ms !== undefined && this._charts.decode) {
+        this._charts.decode.push(d.decode_time_ms);
+      }
+      if (d.decoder_fps !== undefined && this._charts.fps) {
+        this._charts.fps.push(d.decoder_fps);
+      }
+      if (d.pipeline_fps !== undefined && this._charts.fps) {
+        this._charts.fps.push(d.pipeline_fps);
+      }
+      if (d.avg_jitter_ms !== undefined) this.diagnostics.avg_jitter_ms = d.avg_jitter_ms;
+      if (d.drop_rate !== undefined) this.diagnostics.drop_rate = d.drop_rate;
+      if (d.pipeline_health !== undefined) this.diagnostics.health = d.pipeline_health;
+
+      if (d.resolution) {
+        var m = d.resolution.match(/(\d+p)/);
+        if (m) this.controls.resolution = m[1];
+      }
+      if (d.fov) this.controls.fov = d.fov;
+    },
+
+    _updateUptime() {
+      var s = Math.floor((Date.now() - this._startTime) / 1000);
+      var h = Math.floor(s / 3600);
+      var m = Math.floor((s % 3600) / 60);
+      var sec = s % 60;
+      this.uptime = h > 0 ? h + 'h ' + m + 'm ' + sec + 's' : m > 0 ? m + 'm ' + sec + 's' : sec + 's';
+    },
+
+    // ── Camera controls ──
+    setResolution() { apiPost('/api/camera/resolution', { resolution: this.controls.resolution }); },
+    setFov() { apiPost('/api/camera/fov', { fov: this.controls.fov }); },
+
+    // ── Transport ──
+    moveTransport(idx, dir) {
+      var arr = this.transport.priority;
+      var target = idx + dir;
+      if (target < 0 || target >= arr.length) return;
+      var tmp = arr[idx];
+      arr[idx] = arr[target];
+      arr[target] = tmp;
+      apiPost('/api/transport/priority', { priority: arr });
+    },
+    switchTransport(name) { apiPost('/api/transport/switch', { transport: name }); },
+
+    // ── Settings ──
+    saveSetting(key, value) {
+      var body = {};
+      body[key] = value;
+      apiPost('/api/settings', body);
+    },
+
+    // ── Export diagnostics ──
+    exportDiagnostics() {
+      var payload = {
+        timestamp: new Date().toISOString(),
+        decode_time_history: this._charts.decode ? this._charts.decode.data.slice() : [],
+        fps_history: this._charts.fps ? this._charts.fps.data.slice() : [],
+        frame_drops: this.diagnostics.frame_drops,
+        status: JSON.parse(JSON.stringify(this.status)),
+      };
+      var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'gomaxwebcam-diagnostics-' + Date.now() + '.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    },
+
+    // ── Wizard ──
+
+    wizardOpen() {
+      this.wizard.show = true;
+      this.wizard.step = 1;
+      this.wizard.error = '';
+      this.wizard.phase = 'idle';
+      this.wizard.scan_done = false;
+      this.wizard.cameras = [];
+      this.wizard.selected = null;
+      this.wizard.provisioning = false;
+      this.wizard.confirming = false;
+      this.wizard.confirmed = false;
+      this.wizard.progress_pct = 0;
+      this.wizard.status_msg = '';
+      this.wizard.confirm_data = { camera_ip: '', cohn_username: '', camera_serial: '', camera_name: '' };
+    },
+
+    wizardClose() {
+      this.wizard.show = false;
+      this._wizardStopProgressSSE();
+    },
+
+    /** Step 1: POST /api/wizard/scan — BLE scan for cameras */
+    wizardScan() {
+      var self = this;
+      this.wizard.scanning = true;
+      this.wizard.scan_done = false;
+      this.wizard.cameras = [];
+      this.wizard.selected = null;
+      this.wizard.error = '';
+
+      apiPost('/api/wizard/scan', { timeout_s: parseFloat(this.wizard.scan_timeout) || 10 })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (data.error) {
+            self.wizard.error = data.error;
+          } else {
+            self.wizard.cameras = (data.cameras || []).map(function (c) {
+              return { address: c.address, name: c.name, rssi: c.rssi || -100, serial_suffix: c.serial_suffix || '', model_hint: c.model_hint || '' };
+            });
+          }
+          self.wizard.scan_done = true;
+        })
+        .catch(function (e) {
+          console.error('Scan failed', e);
+          self.wizard.error = 'BLE scan failed: ' + (e.message || e);
+          self.wizard.scan_done = true;
+        })
+        .finally(function () { self.wizard.scanning = false; });
+    },
+
+    /** Step 1 → 2: Click camera in list to highlight it */
+    wizardSelectCamera(cam) {
+      this.wizard.selected = cam;
+    },
+
+    /** Step 1 → 2: POST /api/wizard/select — confirm camera choice on server */
+    wizardConfirmSelect() {
+      var self = this;
+      if (!this.wizard.selected) return;
+      this.wizard.error = '';
+
+      apiPost('/api/wizard/select', {
+        address: this.wizard.selected.address,
+        name: this.wizard.selected.name,
+      })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (data.selected) {
+            self.wizard.step = 2;
+            self.wizard.error = '';
+          } else {
+            self.wizard.error = data.error || 'Failed to select camera';
+          }
+        })
+        .catch(function (e) {
+          console.error('Select failed', e);
+          self.wizard.error = 'Selection failed: ' + (e.message || e);
+        });
+    },
+
+    /** Step 3: POST /api/wizard/provision — start COHN provisioning */
+    wizardProvision() {
+      var self = this;
+      if (!this.wizard.wifi_ssid || !this.wizard.wifi_pass) {
+        this.wizard.error = 'WiFi SSID and password are required.';
+        return;
+      }
+      this.wizard.error = '';
+      this.wizard.provisioning = true;
+      this.wizard.phase = 'provisioning';
+      this.wizard.progress_pct = 0;
+      this.wizard.status_msg = 'Starting provisioning...';
+      this.wizard.elapsed_s = 0;
+
+      // Start SSE progress stream before POST
+      this._wizardStartProgressSSE();
+
+      apiPost('/api/wizard/provision', {
+        wifi_ssid: this.wizard.wifi_ssid,
+        wifi_password: this.wizard.wifi_pass,
+        camera_address: this.wizard.selected ? this.wizard.selected.address : '',
+        camera_name: this.wizard.selected ? this.wizard.selected.name : '',
+      })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (!data.started) {
+            self.wizard.error = data.error || 'Failed to start provisioning';
+            self.wizard.provisioning = false;
+            self.wizard.phase = 'failed';
+            self._wizardStopProgressSSE();
+          }
+          // If started, progress will arrive via SSE
+        })
+        .catch(function (e) {
+          console.error('Provision failed', e);
+          self.wizard.error = 'Provisioning request failed: ' + (e.message || e);
+          self.wizard.provisioning = false;
+          self.wizard.phase = 'failed';
+          self._wizardStopProgressSSE();
+        });
+    },
+
+    /** Cancel in-progress provisioning */
+    wizardCancel() {
+      var self = this;
+      apiPost('/api/wizard/cancel', {})
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          self.wizard.provisioning = false;
+          self.wizard.phase = 'cancelled';
+          self.wizard.status_msg = data.message || 'Cancelled';
+          self.wizard.error = 'Provisioning was cancelled.';
+          self._wizardStopProgressSSE();
+        })
+        .catch(function (e) {
+          console.error('Cancel failed', e);
+        });
+    },
+
+    /** Reset provisioning state to try again */
+    wizardResetProvision() {
+      this.wizard.step = 3;
+      this.wizard.provisioning = false;
+      this.wizard.phase = 'idle';
+      this.wizard.progress_pct = 0;
+      this.wizard.status_msg = '';
+      this.wizard.error = '';
+      this.wizard.elapsed_s = 0;
+      this._wizardStopProgressSSE();
+    },
+
+    /** Step 4: POST /api/wizard/confirm — verify credentials */
+    wizardConfirm() {
+      var self = this;
+      this.wizard.confirming = true;
+      this.wizard.confirmed = false;
+      this.wizard.error = '';
+
+      apiPost('/api/wizard/confirm', {})
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (data.confirmed) {
+            self.wizard.confirmed = true;
+            self.wizard.confirm_data = {
+              camera_ip: data.camera_ip || '',
+              cohn_username: data.cohn_username || '',
+              camera_serial: data.camera_serial || '',
+              camera_name: self.wizard.selected ? self.wizard.selected.name : '',
+            };
+          } else {
+            self.wizard.error = data.error || data.message || 'Credential verification failed.';
+          }
+        })
+        .catch(function (e) {
+          console.error('Confirm failed', e);
+          self.wizard.error = 'Confirmation request failed: ' + (e.message || e);
+        })
+        .finally(function () { self.wizard.confirming = false; });
+    },
+
+    /** Start SSE progress stream for provisioning feedback */
+    _wizardStartProgressSSE() {
+      this._wizardStopProgressSSE();
+      var self = this;
+      var url = '/api/wizard/progress' + (TOKEN ? '?token=' + encodeURIComponent(TOKEN) : '');
+      var es = new EventSource(url);
+      this.wizard._progressSSE = es;
+
+      es.addEventListener('wizard_progress', function (e) {
+        try {
+          var d = JSON.parse(e.data);
+          self.wizard.progress_pct = d.progress_pct || 0;
+          self.wizard.status_msg = d.message || '';
+          self.wizard.phase = d.phase || 'provisioning';
+          self.wizard.elapsed_s = d.elapsed_s || 0;
+
+          if (d.error) {
+            self.wizard.error = d.error;
+          }
+
+          // Handle terminal states
+          if (d.phase === 'complete') {
+            self.wizard.provisioning = false;
+            self.wizard.progress_pct = 100;
+            self._wizardStopProgressSSE();
+            // Auto-advance to confirm step
+            self.wizard.step = 4;
+            self.wizardConfirm();
+          } else if (d.phase === 'failed') {
+            self.wizard.provisioning = false;
+            self.wizard.error = d.error || d.message || 'Provisioning failed.';
+            self._wizardStopProgressSSE();
+          } else if (d.phase === 'cancelled') {
+            self.wizard.provisioning = false;
+            self.wizard.error = 'Provisioning was cancelled.';
+            self._wizardStopProgressSSE();
+          }
+        } catch (err) {
+          console.error('Wizard SSE parse error', err);
+        }
+      });
+
+      es.onerror = function () {
+        // SSE disconnected — don't overwrite state if already complete
+        if (self.wizard.phase !== 'complete' && self.wizard.phase !== 'failed' && self.wizard.phase !== 'cancelled') {
+          // Check status via REST as fallback
+          self._wizardPollStatus();
+        }
+        self._wizardStopProgressSSE();
+      };
+    },
+
+    /** Stop SSE progress stream */
+    _wizardStopProgressSSE() {
+      if (this.wizard._progressSSE) {
+        this.wizard._progressSSE.close();
+        this.wizard._progressSSE = null;
+      }
+    },
+
+    /** Fallback: poll wizard status via REST when SSE disconnects */
+    _wizardPollStatus() {
+      var self = this;
+      fetch('/api/wizard/status' + (TOKEN ? '?token=' + encodeURIComponent(TOKEN) : ''), {
+        headers: apiHeaders(),
+      })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (d) {
+          if (!d) return;
+          self.wizard.phase = d.phase || self.wizard.phase;
+          self.wizard.progress_pct = d.progress_pct || self.wizard.progress_pct;
+          self.wizard.status_msg = d.message || self.wizard.status_msg;
+          if (d.error) self.wizard.error = d.error;
+          if (d.phase === 'complete') {
+            self.wizard.provisioning = false;
+            self.wizard.step = 4;
+            self.wizardConfirm();
+          } else if (d.phase === 'failed' || d.phase === 'cancelled') {
+            self.wizard.provisioning = false;
+          }
+        })
+        .catch(function () { /* silent */ });
+    },
+  };
+}
+</script>
+</body>
+</html>
