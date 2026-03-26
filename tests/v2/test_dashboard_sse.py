@@ -807,3 +807,425 @@ class TestRecentEventsEndpoint:
         )
         assert resp.status_code == 200
         assert resp.json()["count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Last-Event-ID / event ID tests
+# ---------------------------------------------------------------------------
+
+class TestLastEventID:
+    """Tests for SSE event IDs and Last-Event-ID reconnect support."""
+
+    # -- Event.id assignment by EventBus --
+
+    def test_published_event_gets_sequential_id(self):
+        """EventBus should assign a sequential ID to each published event."""
+        bus = EventBus()
+        evt1 = battery_event(level=10)
+        evt2 = battery_event(level=20)
+
+        # IDs start at 0 (unassigned) before publish
+        assert evt1.id == 0
+
+        bus.publish(evt1)
+        bus.publish(evt2)
+
+        # After publishing, history events carry sequential IDs
+        history = bus.recent_events
+        assert history[0].id == 1
+        assert history[1].id == 2
+
+    def test_event_ids_are_monotonically_increasing(self):
+        """Event IDs should increment by 1 for each published event."""
+        bus = EventBus()
+        for i in range(5):
+            bus.publish(battery_event(level=i * 10))
+
+        ids = [e.id for e in bus.recent_events]
+        assert ids == [1, 2, 3, 4, 5]
+
+    def test_event_with_preassigned_id_is_not_overwritten(self):
+        """An event that already has a non-zero ID should keep its ID."""
+        from dataclasses import replace as dr
+        from gomaxwebcam.events import Event
+        bus = EventBus()
+        evt = dr(battery_event(level=42), id=999)
+        bus.publish(evt)
+
+        history = bus.recent_events
+        assert history[0].id == 999
+
+    # -- to_sse() includes id field --
+
+    def test_to_sse_includes_id_when_assigned(self):
+        """to_sse() should emit an 'id:' line when the event has a non-zero ID."""
+        from dataclasses import replace as dr
+        evt = dr(battery_event(level=85), id=7)
+        sse = evt.to_sse()
+        lines = sse.strip().splitlines()
+        assert lines[0] == "id: 7"
+        assert any(l.startswith("event: battery") for l in lines)
+        assert any(l.startswith("data:") for l in lines)
+
+    def test_to_sse_omits_id_when_zero(self):
+        """to_sse() should NOT emit an 'id:' line for unassigned (id=0) events."""
+        evt = battery_event(level=50)
+        assert evt.id == 0
+        sse = evt.to_sse()
+        assert "id:" not in sse
+
+    def test_to_dict_includes_id_when_assigned(self):
+        """to_dict() should include 'id' key when event has a non-zero ID."""
+        from dataclasses import replace as dr
+        evt = dr(battery_event(level=85), id=3)
+        d = evt.to_dict()
+        assert d["id"] == 3
+
+    def test_to_dict_omits_id_when_zero(self):
+        """to_dict() should NOT include 'id' key for unassigned events."""
+        evt = battery_event(level=50)
+        d = evt.to_dict()
+        assert "id" not in d
+
+    # -- subscribe() since_event_id replay --
+
+    @pytest.mark.asyncio
+    async def test_subscribe_since_event_id_replays_missed_events(self):
+        """subscribe(since_event_id=N) should replay events with id > N."""
+        bus = EventBus()
+        bus.publish(battery_event(level=10))   # id=1
+        bus.publish(battery_event(level=20))   # id=2
+        bus.publish(battery_event(level=30))   # id=3
+
+        # Client last saw id=1, so it should receive id=2 and id=3
+        sub = bus.subscribe(since_event_id=1)
+
+        e1 = await asyncio.wait_for(sub.__anext__(), timeout=1.0)
+        e2 = await asyncio.wait_for(sub.__anext__(), timeout=1.0)
+        assert e1.data["level"] == 20
+        assert e1.id == 2
+        assert e2.data["level"] == 30
+        assert e2.id == 3
+
+        bus.unsubscribe(sub)
+
+    @pytest.mark.asyncio
+    async def test_subscribe_since_event_id_zero_replays_all(self):
+        """subscribe(since_event_id=0) should replay all history (id > 0)."""
+        bus = EventBus()
+        bus.publish(battery_event(level=10))   # id=1
+        bus.publish(battery_event(level=20))   # id=2
+
+        sub = bus.subscribe(since_event_id=0)
+
+        e1 = await asyncio.wait_for(sub.__anext__(), timeout=1.0)
+        e2 = await asyncio.wait_for(sub.__anext__(), timeout=1.0)
+        assert e1.data["level"] == 10
+        assert e2.data["level"] == 20
+
+        bus.unsubscribe(sub)
+
+    @pytest.mark.asyncio
+    async def test_subscribe_since_event_id_beyond_history_receives_no_replay(self):
+        """subscribe(since_event_id=N) where N >= latest id should get no replay."""
+        bus = EventBus()
+        bus.publish(battery_event(level=10))   # id=1
+        bus.publish(battery_event(level=20))   # id=2
+
+        # Client claims to have seen id=5 (beyond history) — no replay expected
+        sub = bus.subscribe(since_event_id=5)
+
+        # Publish a new event so the subscription doesn't block forever
+        bus.publish(battery_event(level=99))   # id=3 → delivered live
+
+        e = await asyncio.wait_for(sub.__anext__(), timeout=1.0)
+        assert e.data["level"] == 99  # Only the new live event
+        assert e.id == 3
+
+        bus.unsubscribe(sub)
+
+    @pytest.mark.asyncio
+    async def test_subscribe_since_event_id_with_type_filter(self):
+        """since_event_id replay should respect the event_types filter."""
+        bus = EventBus()
+        bus.publish(battery_event(level=10))         # id=1
+        bus.publish(connection_event("DISC", "CONN", "USB"))  # id=2
+        bus.publish(battery_event(level=30))         # id=3
+
+        # Client last saw id=0, wants only battery events
+        sub = bus.subscribe(
+            event_types={EventType.BATTERY},
+            since_event_id=0,
+        )
+
+        e1 = await asyncio.wait_for(sub.__anext__(), timeout=1.0)
+        e2 = await asyncio.wait_for(sub.__anext__(), timeout=1.0)
+        assert e1.type == EventType.BATTERY
+        assert e2.type == EventType.BATTERY
+        assert e1.data["level"] == 10
+        assert e2.data["level"] == 30
+
+        bus.unsubscribe(sub)
+
+    # -- SSE endpoint Last-Event-ID header support --
+
+    @pytest.mark.asyncio
+    async def test_events_stream_last_event_id_header_replays_missed(
+        self, app, auth_token, event_bus
+    ):
+        """GET /api/events/stream with Last-Event-ID header should replay missed events.
+
+        Uses bus.shutdown() to terminate the infinite SSE stream so the response
+        body can be inspected — the same pattern the existing SSE tests use.
+        """
+        # Pre-publish some events so they land in history with ids 1 and 2
+        event_bus.publish(battery_event(level=10))   # id=1
+        event_bus.publish(battery_event(level=20))   # id=2
+
+        # Schedule a bus shutdown so the SSE generator terminates after a short delay,
+        # allowing the history replay to be included in the response body.
+        async def _shutdown_soon():
+            await asyncio.sleep(0.05)
+            await event_bus.shutdown()
+
+        asyncio.create_task(_shutdown_soon())
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            resp = await c.get(
+                f"/api/events/stream?token={auth_token}",
+                headers={"Last-Event-ID": "1"},
+            )
+
+        # Should have received the stream body after shutdown
+        assert resp.status_code == 200
+        body = resp.text
+        # Only id=2 should be replayed (id=1 was already seen by the client)
+        assert "id: 2" in body
+        assert "level" in body
+
+    @pytest.mark.asyncio
+    async def test_events_stream_invalid_last_event_id_is_ignored(
+        self, app, auth_token, event_bus
+    ):
+        """GET /api/events/stream with invalid Last-Event-ID should not error (returns 200).
+
+        Uses bus.shutdown() to terminate the stream quickly.
+        """
+        # Schedule shutdown so the stream terminates
+        async def _shutdown_soon():
+            await asyncio.sleep(0.05)
+            await event_bus.shutdown()
+
+        asyncio.create_task(_shutdown_soon())
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            resp = await c.get(
+                f"/api/events/stream?token={auth_token}",
+                headers={"Last-Event-ID": "not-a-number"},
+            )
+
+        # Should still return 200 — bad header is silently ignored
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_published_events_include_id_in_sse_output(self, event_bus):
+        """Events published to the bus should carry sequential IDs in their SSE text."""
+        event_bus.publish(battery_event(level=55))
+        event_bus.publish(battery_event(level=66))
+
+        history = event_bus.recent_events
+        sse1 = history[0].to_sse()
+        sse2 = history[1].to_sse()
+
+        assert "id: 1" in sse1
+        assert "id: 2" in sse2
+
+
+# ---------------------------------------------------------------------------
+# Client-side SSE auto-reconnect logic tests
+# ---------------------------------------------------------------------------
+
+class TestClientSideSSEAutoReconnect:
+    """Tests that the dashboard HTML includes client-side SSE auto-reconnect
+    with exponential backoff.
+
+    All tests serve the real HTML via the FastAPI ASGI app and inspect the
+    JavaScript source for the required reconnect implementation.  No real
+    browser or hardware is involved.
+    """
+
+    # ── helpers ──────────────────────────────────────────────────────────────
+
+    @staticmethod
+    async def _get_html(client, auth_token: str) -> str:
+        resp = await client.get(f"/?token={auth_token}")
+        assert resp.status_code == 200
+        return resp.text
+
+    # ── _connectSSE function present ─────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_connect_sse_function_is_defined(self, client, auth_token):
+        """Dashboard JS must define a _connectSSE() function."""
+        html = await self._get_html(client, auth_token)
+        assert "_connectSSE" in html, "_connectSSE function not found in dashboard HTML"
+
+    # ── Reconnect state variables ─────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_sse_connected_state_variable_present(self, client, auth_token):
+        """sseConnected state variable must be declared for connection tracking."""
+        html = await self._get_html(client, auth_token)
+        assert "sseConnected" in html
+
+    @pytest.mark.asyncio
+    async def test_sse_countdown_state_variable_present(self, client, auth_token):
+        """sseCountdown variable must exist for the user-facing reconnect countdown."""
+        html = await self._get_html(client, auth_token)
+        assert "sseCountdown" in html
+
+    @pytest.mark.asyncio
+    async def test_sse_delay_state_variable_present(self, client, auth_token):
+        """_sseDelay variable must track the current backoff delay."""
+        html = await self._get_html(client, auth_token)
+        assert "_sseDelay" in html
+
+    @pytest.mark.asyncio
+    async def test_sse_attempts_state_variable_present(self, client, auth_token):
+        """_sseAttempts variable must count consecutive failures for backoff calc."""
+        html = await self._get_html(client, auth_token)
+        assert "_sseAttempts" in html
+
+    @pytest.mark.asyncio
+    async def test_sse_reconnect_timer_handle_present(self, client, auth_token):
+        """_sseReconnectTimer must store the pending setTimeout handle."""
+        html = await self._get_html(client, auth_token)
+        assert "_sseReconnectTimer" in html
+
+    # ── Exponential backoff implementation ────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_exponential_backoff_uses_math_pow(self, client, auth_token):
+        """Backoff calculation must use Math.pow for exponential growth."""
+        html = await self._get_html(client, auth_token)
+        assert "Math.pow" in html, "Exponential backoff requires Math.pow"
+
+    @pytest.mark.asyncio
+    async def test_exponential_backoff_cap_at_30_seconds(self, client, auth_token):
+        """Backoff must be capped at 30 000 ms to avoid very long waits."""
+        html = await self._get_html(client, auth_token)
+        assert "30000" in html, "30 s (30000 ms) cap not found in dashboard HTML"
+
+    @pytest.mark.asyncio
+    async def test_exponential_backoff_uses_min_clamp(self, client, auth_token):
+        """Math.min must be used to clamp the backoff delay at the cap."""
+        html = await self._get_html(client, auth_token)
+        assert "Math.min" in html, "Math.min clamp for backoff cap not found"
+
+    @pytest.mark.asyncio
+    async def test_jitter_applied_to_backoff_delay(self, client, auth_token):
+        """Jitter (Math.random) must be added to prevent thundering-herd."""
+        html = await self._get_html(client, auth_token)
+        assert "Math.random" in html, "Jitter via Math.random not found"
+
+    # ── onerror handler ───────────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_onerror_handler_closes_connection(self, client, auth_token):
+        """onerror must call es.close() to cleanly discard the broken stream."""
+        html = await self._get_html(client, auth_token)
+        assert "es.close()" in html, "es.close() not found in onerror handler"
+
+    @pytest.mark.asyncio
+    async def test_onerror_handler_schedules_reconnect_with_settimeout(
+        self, client, auth_token
+    ):
+        """onerror must use setTimeout to schedule the next _connectSSE() call."""
+        html = await self._get_html(client, auth_token)
+        assert "setTimeout" in html, "setTimeout not found — reconnect not scheduled"
+
+    @pytest.mark.asyncio
+    async def test_onerror_handler_increments_attempt_counter(
+        self, client, auth_token
+    ):
+        """onerror must increment _sseAttempts so subsequent delays grow."""
+        html = await self._get_html(client, auth_token)
+        # Either "_sseAttempts += 1" or "_sseAttempts++" are valid
+        assert (
+            "_sseAttempts += 1" in html or "_sseAttempts++" in html
+        ), "_sseAttempts increment not found in onerror handler"
+
+    # ── Backoff reset on success ───────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_backoff_reset_on_first_successful_message(
+        self, client, auth_token
+    ):
+        """A successful message must reset _sseDelay and _sseAttempts to initial
+        values so the next failure starts the backoff from the beginning."""
+        html = await self._get_html(client, auth_token)
+        # Both reset assignments must be present
+        assert "_sseDelay = 1000" in html, "_sseDelay not reset to 1000 on success"
+        assert "_sseAttempts = 0" in html, "_sseAttempts not reset to 0 on success"
+
+    @pytest.mark.asyncio
+    async def test_countdown_reset_on_first_successful_message(
+        self, client, auth_token
+    ):
+        """sseCountdown must be cleared (set to 0) when the connection is restored."""
+        html = await self._get_html(client, auth_token)
+        assert "sseCountdown = 0" in html
+
+    # ── Countdown UI ──────────────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_countdown_ui_updated_with_setinterval(self, client, auth_token):
+        """A setInterval tick must count down sseCountdown each second."""
+        html = await self._get_html(client, auth_token)
+        assert "setInterval" in html, "setInterval countdown tick not found"
+
+    @pytest.mark.asyncio
+    async def test_countdown_uses_math_max_floor(self, client, auth_token):
+        """Countdown must use Math.max to avoid going below zero."""
+        html = await self._get_html(client, auth_token)
+        assert "Math.max" in html, "Math.max guard for countdown not found"
+
+    @pytest.mark.asyncio
+    async def test_countdown_value_shown_in_hint_text(self, client, auth_token):
+        """The hint text must reference sseCountdown so users see the timer."""
+        html = await self._get_html(client, auth_token)
+        assert "sseCountdown" in html
+        # 'reconnecting in' message must be present somewhere in the page
+        assert "reconnect" in html.lower()
+
+    # ── Guard: pending timer is cancelled before re-opening ───────────────────
+
+    @pytest.mark.asyncio
+    async def test_existing_reconnect_timer_cancelled_before_new_connect(
+        self, client, auth_token
+    ):
+        """_connectSSE must cancel any pending timer with clearTimeout to avoid
+        double-reconnect if the caller triggers reconnection manually."""
+        html = await self._get_html(client, auth_token)
+        assert "clearTimeout" in html, "clearTimeout not found — timer leak possible"
+
+    # ── EventSource is set up for /api/status/stream ──────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_eventsource_targets_status_stream_url(self, client, auth_token):
+        """EventSource must open /api/status/stream (the correct SSE endpoint)."""
+        html = await self._get_html(client, auth_token)
+        assert "EventSource" in html
+        assert "/api/status/stream" in html
+
+    # ── SSE indicator visible in sidebar ─────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_sse_indicator_element_present_in_sidebar(
+        self, client, auth_token
+    ):
+        """The sidebar must contain an SSE status indicator showing live/reconnecting."""
+        html = await self._get_html(client, auth_token)
+        assert "sse-indicator" in html or "sse-dot" in html or "sseConnected" in html

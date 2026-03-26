@@ -214,19 +214,53 @@ def main() -> None:
     from gomaxwebcam.camera_manager import CameraManager
     from gomaxwebcam.dashboard.status_tracker import CameraStatusTracker
     from gomaxwebcam.orchestrator import AppOrchestrator
-    from gomaxwebcam.transport_manager import TransportManager
+    from gomaxwebcam.transport_manager import TransportManager, TransportManagerConfig
     from gomaxwebcam.transport.usb import USBTransport
     from gomaxwebcam.transport.cohn import COHNTransport
 
     event_bus = EventBus()
     camera_manager = CameraManager(event_bus)
     status_tracker = CameraStatusTracker()
-    transport_manager = TransportManager(event_bus)
+
+    # Build TransportManager config from user settings.
+    # priority_for_manager() converts lowercase TOML names ("usb") to the
+    # uppercase names registered with TransportManager ("USB").
+    tm_config = TransportManagerConfig(
+        priority=cfg.transport.priority_for_manager(),
+        backoff_base_s=float(cfg.advanced.backoff_base_seconds),
+        backoff_cap_s=float(cfg.advanced.backoff_cap_seconds),
+        usb_poll_interval_s=cfg.advanced.usb_poll_interval,
+    )
+    transport_manager = TransportManager(event_bus, config=tm_config)
     auth_token = secrets.token_urlsafe(32)
 
+    # Convert video config string values to the integer codes the transports use.
+    # e.g. "1080p" → 12,  "wide" → 0
+    _res = cfg.video.resolution_code()
+    _fov = cfg.video.fov_code()
+
+    # Serial hint: use the stored serial suffix if one was saved from a previous
+    # connection, otherwise let the USB transport auto-discover.
+    _serial = cfg.camera.camera_serial or None
+
     # -- Register transports for failover management (USB primary, COHN fallback) --
-    transport_manager.register_transport("USB", USBTransport())
-    transport_manager.register_transport("COHN", COHNTransport())
+    transport_manager.register_transport("USB", USBTransport(
+        serial=_serial,
+        udp_port=cfg.advanced.udp_port,
+        resolution=_res,
+        fov=_fov,
+        keepalive_interval=cfg.advanced.keepalive_interval,
+        max_consecutive_failures=cfg.advanced.max_consecutive_failures,
+    ))
+    transport_manager.register_transport("COHN", COHNTransport(
+        # last_known_ip populated from a previous session if available;
+        # None lets the COHN transport fall back to mDNS discovery.
+        ip_address=cfg.camera.last_known_ip or None,
+        udp_port=cfg.advanced.udp_port,
+        resolution=_res,
+        fov=_fov,
+        keepalive_interval=cfg.advanced.keepalive_interval,
+    ))
 
     bind_host = "0.0.0.0" if headless else "127.0.0.1"
     port = _find_free_port()
@@ -288,6 +322,19 @@ def main() -> None:
     log.info("Dashboard: %s", dashboard_url)
     if headless:
         print(f"Dashboard URL: {dashboard_url}", flush=True)
+
+    # Open the dashboard automatically on startup when configured and not headless.
+    # A short delay lets uvicorn finish binding before the browser hits the URL.
+    if cfg.dashboard.open_browser_on_start and not headless:
+        def _open_browser_deferred() -> None:
+            import time as _time
+            _time.sleep(1.5)
+            webbrowser.open(dashboard_url)
+        threading.Thread(
+            target=_open_browser_deferred,
+            name="browser-open",
+            daemon=True,
+        ).start()
 
     # -- Signal handling for graceful shutdown --
     _shutdown_requested = False  # Track first vs second signal

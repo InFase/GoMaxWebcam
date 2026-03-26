@@ -372,6 +372,70 @@ html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: 
   vertical-align: middle; margin-right: 6px;
 }
 
+/* ── Tooltips ── */
+.tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.tip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--gp-border-hi);
+  color: var(--gp-muted);
+  font-size: 0.6rem;
+  font-weight: 700;
+  font-style: normal;
+  cursor: help;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+  user-select: none;
+}
+.tip-icon:hover { background: var(--gp-accent); color: #fff; }
+.tip-text {
+  visibility: hidden;
+  opacity: 0;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1e2330;
+  border: 1px solid var(--gp-border-hi);
+  color: var(--gp-text);
+  font-size: 0.78rem;
+  font-weight: 400;
+  line-height: 1.4;
+  padding: 8px 12px;
+  border-radius: 8px;
+  width: 240px;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: normal;
+  pointer-events: none;
+  z-index: 500;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  transition: opacity 0.15s, visibility 0.15s;
+}
+.tip-text::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: var(--gp-border-hi);
+}
+.tip:hover .tip-text,
+.tip:focus-within .tip-text { visibility: visible; opacity: 1; }
+/* Flip tooltip left when near right edge */
+.tip.tip-left .tip-text { left: auto; right: 0; transform: none; }
+.tip.tip-left .tip-text::after { left: auto; right: 12px; transform: none; }
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
   .sidebar { width: 60px; }
@@ -382,6 +446,133 @@ html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: 
   .form-row { grid-template-columns: 1fr; }
   .diag-stats { grid-template-columns: 1fr 1fr; }
 }
+
+/* ── Toast notifications ── */
+.toast-container {
+  position: fixed; bottom: 24px; right: 24px;
+  z-index: 3000; display: flex; flex-direction: column; gap: 8px;
+  align-items: flex-end; pointer-events: none;
+}
+.toast {
+  background: var(--gp-card); border: 1px solid var(--gp-border-hi);
+  border-radius: 10px; padding: 10px 16px;
+  font-size: 0.82rem; color: var(--gp-text);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+  display: flex; align-items: center; gap: 8px;
+  max-width: 280px; animation: toast-in 0.2s ease;
+}
+.toast.success { border-left: 3px solid var(--gp-green); }
+.toast.error   { border-left: 3px solid var(--gp-red); }
+.toast.info    { border-left: 3px solid var(--gp-accent); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ── Keyboard shortcut overlay ── */
+@keyframes kbd-fade-in {
+  from { opacity: 0; transform: scale(0.96) translateY(-8px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0);     }
+}
+.kbd-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.72);
+  display: flex; align-items: center; justify-content: center; z-index: 4000;
+  backdrop-filter: blur(2px);
+}
+.kbd-panel {
+  background: var(--gp-card); border: 1px solid var(--gp-border-hi);
+  border-radius: 16px; padding: 26px 30px; max-width: 460px; width: 90%;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+  animation: kbd-fade-in 0.18s ease;
+}
+.kbd-panel h3 {
+  margin: 0 0 6px; font-size: 1.05rem;
+  display: flex; align-items: center; gap: 8px;
+}
+.kbd-section-label {
+  font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--gp-accent); margin: 16px 0 6px;
+  padding-bottom: 4px; border-bottom: 1px solid var(--gp-border);
+}
+.kbd-section-label:first-of-type { margin-top: 4px; }
+.kbd-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 0; border-bottom: 1px solid rgba(37,42,51,0.6); font-size: 0.83rem;
+}
+.kbd-row:last-of-type { border-bottom: none; }
+.kbd-row .k-desc { color: var(--gp-text); }
+.kbd-row .k-hint { font-size: 0.71rem; color: var(--gp-muted); margin-top: 1px; }
+.kbd-keys { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+kbd {
+  display: inline-block; background: var(--gp-surface);
+  border: 1px solid var(--gp-border-hi); border-bottom-width: 2px; border-radius: 5px;
+  padding: 2px 9px; font-size: 0.77rem; font-family: monospace;
+  color: var(--gp-text); letter-spacing: 0.02em;
+}
+kbd.wide { padding: 2px 14px; }
+.kbd-panel-footer {
+  margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--gp-border);
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 0.72rem; color: var(--gp-muted);
+}
+/* Floating help button (page headers) */
+.help-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--gp-surface); border: 1px solid var(--gp-border);
+  color: var(--gp-muted); font-size: 0.78rem; font-weight: 700;
+  cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s;
+  text-decoration: none; flex-shrink: 0;
+  font-style: normal;
+}
+.help-btn:hover { background: var(--gp-accent); color: #fff; border-color: var(--gp-accent); }
+/* ── SSE connection status indicator (sidebar footer) ── */
+.sse-indicator {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 0.68rem; color: var(--gp-muted); margin-top: 5px;
+}
+.sse-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  flex-shrink: 0; transition: background 0.4s;
+}
+.sse-dot.connected    { background: var(--gp-green); }
+.sse-dot.reconnecting { background: var(--gp-yellow); animation: sse-pulse 1.2s ease-in-out infinite; }
+.sse-dot.connecting   { background: var(--gp-yellow); animation: sse-pulse 1.2s ease-in-out infinite; }
+.sse-dot.disconnected { background: var(--gp-muted); }
+@keyframes sse-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}
+
+.kbd-footer-hint {
+  font-size: 0.65rem; color: var(--gp-muted); cursor: pointer;
+  display: flex; align-items: center; gap: 4px; margin-top: 6px;
+  opacity: 0.7; transition: opacity 0.15s;
+}
+.kbd-footer-hint:hover { opacity: 1; }
+
+/* ── Camera connection status indicator (sidebar footer) ── */
+.cam-indicator {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 0.68rem; color: var(--gp-muted); margin-top: 4px;
+}
+.cam-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  flex-shrink: 0; transition: background 0.4s, box-shadow 0.4s;
+  background: var(--gp-muted);
+}
+.cam-dot.cam-live         { background: var(--gp-green); box-shadow: 0 0 5px var(--gp-green); animation: cam-live-pulse 2.5s ease-in-out infinite; }
+.cam-dot.cam-reconnecting { background: var(--gp-yellow); animation: sse-pulse 1s ease-in-out infinite; }
+.cam-dot.cam-error        { background: var(--gp-red); box-shadow: 0 0 4px var(--gp-red); }
+.cam-dot.cam-idle         { background: var(--gp-muted); }
+@keyframes cam-live-pulse {
+  0%, 100% { box-shadow: 0 0 3px var(--gp-green); }
+  50%       { box-shadow: 0 0 8px var(--gp-green); }
+}
+
+/* ── Dynamic sidebar brand dot (camera state) ── */
+.sidebar-brand .brand-dot                  { transition: background 0.4s, box-shadow 0.4s; }
+.sidebar-brand .brand-dot.cam-live         { background: var(--gp-green); box-shadow: 0 0 7px var(--gp-green); }
+.sidebar-brand .brand-dot.cam-reconnecting { background: var(--gp-yellow); animation: sse-pulse 1.2s ease-in-out infinite; }
+.sidebar-brand .brand-dot.cam-error        { background: var(--gp-red); box-shadow: 0 0 5px var(--gp-red); }
+.sidebar-brand .brand-dot.cam-idle         { background: var(--gp-muted); }
 </style>
 </head>
 
@@ -392,7 +583,7 @@ html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: 
      ═══════════════════════════════════════════ -->
 <aside class="sidebar">
   <div class="sidebar-brand">
-    <span class="brand-dot"></span>
+    <span class="brand-dot" :class="_camDotClass()" :title="_camDotTitle()"></span>
     <span>GoMaxWebcam</span>
   </div>
   <nav class="sidebar-nav">
@@ -415,6 +606,20 @@ html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: 
   </nav>
   <div class="sidebar-footer">
     v2.0 &middot; <span x-text="uptime">0s</span>
+    <!-- Camera connection status -->
+    <div class="cam-indicator" :title="_camDotTitle()">
+      <span class="cam-dot" :class="_camDotClass()"></span>
+      <span x-text="_camLabel()">No Camera</span>
+    </div>
+    <!-- SSE live-feed connection status (connected / reconnecting / disconnected) -->
+    <div class="sse-indicator" :title="_sseStatusTitle()">
+      <span class="sse-dot" :class="_sseDotClass()"></span>
+      <span x-text="_sseStatusLabel()">Connecting…</span>
+    </div>
+    <div class="kbd-footer-hint" @click="showShortcuts = true" title="Keyboard shortcuts">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M10 13h4"/></svg>
+      <span>? keyboard shortcuts</span>
+    </div>
   </div>
 </aside>
 
@@ -427,17 +632,23 @@ html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: 
   <div class="page" :class="{ active: page === 'home' }">
     <div class="page-header">
       <h2>Dashboard</h2>
-      <button class="btn-preview" @click="showPreview = true">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-        Live Preview
-      </button>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="btn-preview" @click="showPreview = true" title="Open live preview (L)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Live Preview
+        </button>
+        <i class="help-btn" @click="showShortcuts = true" title="Keyboard shortcuts (?)">?</i>
+      </div>
     </div>
 
     <!-- Hero status -->
     <div class="card">
       <div class="hero-status">
         <div class="big-dot" :class="status.state"></div>
-        <span class="hero-label" x-text="status.state_label"></span>
+        <div>
+          <span class="hero-label" x-text="status.state_label"></span>
+          <div style="font-size:0.78rem;color:var(--gp-muted);margin-top:4px;" x-show="status.hint" x-text="status.hint"></div>
+        </div>
       </div>
       <div class="stat-grid">
         <div class="stat-item">
@@ -464,7 +675,7 @@ html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: 
                              'health-degraded': diagnostics.health === 'degraded',
                              'health-unhealthy': diagnostics.health === 'unhealthy',
                              'health-unknown': diagnostics.health === 'unknown' }"
-                  x-text="diagnostics.health"></span>
+                  x-text="diagnostics.health ? diagnostics.health.charAt(0).toUpperCase() + diagnostics.health.slice(1) : 'Unknown'"></span>
           </div>
         </div>
         <div class="stat-item">
@@ -486,7 +697,13 @@ html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: 
       <div class="card-title">Video</div>
       <div class="form-row">
         <div class="form-group">
-          <label>Resolution</label>
+          <label>
+            <span class="tip">
+              Resolution
+              <i class="tip-icon" tabindex="0">i</i>
+              <span class="tip-text">The video quality streamed to your apps. Higher is sharper but uses more CPU. <strong>1080p</strong> is the sweet spot for most webcam uses. Choose 720p if your PC feels slow.</span>
+            </span>
+          </label>
           <select x-model="controls.resolution" @change="setResolution()">
             <option value="480p">480p &mdash; 16:9 30fps</option>
             <option value="720p">720p &mdash; 16:9 30fps</option>
@@ -494,7 +711,13 @@ html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: 
           </select>
         </div>
         <div class="form-group">
-          <label>Field of View</label>
+          <label>
+            <span class="tip">
+              Field of View
+              <i class="tip-icon" tabindex="0">i</i>
+              <span class="tip-text">How wide the camera sees. <strong>Wide</strong> captures the most of the scene. <strong>Narrow</strong> zooms in. <strong>Linear</strong> removes fisheye distortion. <strong>SuperView</strong> is GoPro's ultra-wide immersive mode.</span>
+            </span>
+          </label>
           <select x-model="controls.fov" @change="setFov()">
             <option value="wide">Wide</option>
             <option value="linear">Linear</option>
@@ -507,10 +730,34 @@ html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: 
 
     <!-- Transport Priority -->
     <div class="card">
-      <div class="card-title">Transport Priority</div>
+      <div class="card-title">
+        <span class="tip">
+          Transport Priority
+          <i class="tip-icon" tabindex="0">i</i>
+          <span class="tip-text">A "transport" is the connection method between your PC and GoPro. The app tries each one in order from top to bottom, automatically switching to the next if one fails. Green highlight = currently active.</span>
+        </span>
+      </div>
       <p style="font-size:0.8rem;color:var(--gp-muted);margin:0 0 12px;">
-        Drag to reorder. The first available transport will be used.
+        Use the arrows to reorder. The first available transport will be used automatically.
       </p>
+      <!-- Transport legend -->
+      <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
+        <span class="tip" style="font-size:0.75rem;color:var(--gp-muted);">
+          <span style="display:inline-block;width:8px;height:8px;background:var(--gp-green);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>USB
+          <i class="tip-icon" tabindex="0">i</i>
+          <span class="tip-text">Fastest and most reliable. Plug your GoPro into your PC with a USB cable. No network required. <strong>Recommended as your primary connection.</strong></span>
+        </span>
+        <span class="tip" style="font-size:0.75rem;color:var(--gp-muted);">
+          <span style="display:inline-block;width:8px;height:8px;background:var(--gp-cyan);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>COHN
+          <i class="tip-icon" tabindex="0">i</i>
+          <span class="tip-text">Camera On Home Network — streams over your home Wi-Fi without a USB cable. Requires one-time setup (see the Setup page). Great wireless fallback when USB is unavailable.</span>
+        </span>
+        <span class="tip tip-left" style="font-size:0.75rem;color:var(--gp-muted);">
+          <span style="display:inline-block;width:8px;height:8px;background:var(--gp-yellow);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>WiFi AP
+          <i class="tip-icon" tabindex="0">i</i>
+          <span class="tip-text">Connects to the GoPro's own built-in Wi-Fi hotspot. No USB needed, but your PC temporarily joins the camera's network instead of your home network. Slowest option.</span>
+        </span>
+      </div>
       <ul class="transport-list">
         <template x-for="(t, i) in transport.priority" :key="t">
           <li :class="{ active: t === status.transport }">
@@ -519,8 +766,8 @@ html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: 
               <span class="t-name" x-text="t"></span>
             </span>
             <span class="t-actions">
-              <button class="btn btn-sm" :disabled="i === 0" @click="moveTransport(i, -1)">&uarr;</button>
-              <button class="btn btn-sm" :disabled="i === transport.priority.length - 1" @click="moveTransport(i, 1)">&darr;</button>
+              <button class="btn btn-sm" :disabled="i === 0" @click="moveTransport(i, -1)" title="Move up (higher priority)">&uarr;</button>
+              <button class="btn btn-sm" :disabled="i === transport.priority.length - 1" @click="moveTransport(i, 1)" title="Move down (lower priority)">&darr;</button>
             </span>
           </li>
         </template>
@@ -529,14 +776,24 @@ html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: 
 
     <!-- Manual Transport Switch -->
     <div class="card">
-      <div class="card-title">Manual Switch</div>
+      <div class="card-title">
+        <span class="tip">
+          Manual Switch
+          <i class="tip-icon" tabindex="0">i</i>
+          <span class="tip-text">Force an immediate switch to a specific connection method right now, bypassing the automatic priority order. Useful for testing or if auto-detection picks the wrong transport.</span>
+        </span>
+      </div>
+      <p style="font-size:0.8rem;color:var(--gp-muted);margin:0 0 12px;">Force-connect via a specific transport. Highlighted button = currently active.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn" @click="switchTransport('usb')"
-                :class="{ primary: status.transport === 'USB' }">USB</button>
+                :class="{ primary: status.transport === 'USB' }"
+                title="Switch to USB — direct cable connection">USB</button>
         <button class="btn" @click="switchTransport('cohn')"
-                :class="{ primary: status.transport === 'COHN' }">COHN</button>
+                :class="{ primary: status.transport === 'COHN' }"
+                title="Switch to COHN — stream over home Wi-Fi (requires setup)">COHN</button>
         <button class="btn" @click="switchTransport('wifi_ap')"
-                :class="{ primary: status.transport === 'WiFi AP' }">WiFi AP</button>
+                :class="{ primary: status.transport === 'WiFi AP' }"
+                title="Switch to WiFi AP — connect via camera's own hotspot">WiFi AP</button>
       </div>
     </div>
 
@@ -545,7 +802,13 @@ html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: 
       <div class="card-title">General</div>
       <div class="toggle-row">
         <div>
-          <div class="toggle-label">Auto-Start on Login</div>
+          <div class="toggle-label">
+            <span class="tip">
+              Auto-Start on Login
+              <i class="tip-icon" tabindex="0">i</i>
+              <span class="tip-text">Automatically launch GoMaxWebcam when you log into your computer. Your GoPro will be ready as a webcam as soon as you sit down — no manual start needed.</span>
+            </span>
+          </div>
           <div class="toggle-desc">Launch GoMaxWebcam when you log in</div>
         </div>
         <label class="toggle-switch">
@@ -555,8 +818,14 @@ html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: 
       </div>
       <div class="toggle-row">
         <div>
-          <div class="toggle-label">BLE Wake: Always-On</div>
-          <div class="toggle-desc">Keep BLE active for instant camera wake</div>
+          <div class="toggle-label">
+            <span class="tip">
+              BLE Wake: Always-On
+              <i class="tip-icon" tabindex="0">i</i>
+              <span class="tip-text">Keeps Bluetooth Low Energy (BLE) active so the app can detect and wake your camera instantly. Turn this off if you want to save your camera's battery — the app will still connect, just slightly slower.</span>
+            </span>
+          </div>
+          <div class="toggle-desc">Keep Bluetooth active for instant camera wake</div>
         </div>
         <label class="toggle-switch">
           <input type="checkbox" x-model="settings.ble_always_on" @change="saveSetting('ble_wake_mode', settings.ble_always_on ? 'always_on' : 'battery_saver')">
@@ -565,8 +834,14 @@ html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: 
       </div>
       <div class="toggle-row">
         <div>
-          <div class="toggle-label">Debug Logging</div>
-          <div class="toggle-desc">Enable verbose logging for troubleshooting</div>
+          <div class="toggle-label">
+            <span class="tip tip-left">
+              Debug Logging
+              <i class="tip-icon" tabindex="0">i</i>
+              <span class="tip-text">Records detailed technical information to log files. Only enable this when troubleshooting a problem — it creates much larger log files and may slightly affect performance. Leave it off for normal use.</span>
+            </span>
+          </div>
+          <div class="toggle-desc">Verbose logging for troubleshooting (log files grow faster)</div>
         </div>
         <label class="toggle-switch">
           <input type="checkbox" x-model="settings.debug_logging" @change="saveSetting('debug_logging', settings.debug_logging)">
@@ -585,7 +860,7 @@ html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: 
                          'health-degraded': diagnostics.health === 'degraded',
                          'health-unhealthy': diagnostics.health === 'unhealthy',
                          'health-unknown': diagnostics.health === 'unknown' }"
-              x-text="diagnostics.health"></span>
+              x-text="diagnostics.health ? diagnostics.health.charAt(0).toUpperCase() + diagnostics.health.slice(1) : 'Unknown'"></span>
       </h2>
       <button class="btn" @click="exportDiagnostics()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
@@ -868,6 +1143,94 @@ html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: 
   </div>
 </template>
 
+<!-- ══════════════ TOAST NOTIFICATIONS ══════════════ -->
+<div class="toast-container">
+  <template x-for="t in toasts" :key="t.id">
+    <div class="toast" :class="t.type">
+      <span x-text="t.icon" style="font-size:0.9rem;flex-shrink:0;"></span>
+      <span x-text="t.message"></span>
+    </div>
+  </template>
+</div>
+
+<!-- ══════════════ KEYBOARD SHORTCUTS OVERLAY ══════════════ -->
+<template x-if="showShortcuts">
+  <div class="kbd-overlay" @click.self="showShortcuts = false" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+    <div class="kbd-panel">
+      <h3>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity:0.55;flex-shrink:0;"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M10 13h4"/></svg>
+        Keyboard Shortcuts
+      </h3>
+
+      <!-- ── Navigation ── -->
+      <div class="kbd-section-label">Navigation</div>
+      <div class="kbd-row">
+        <div><div class="k-desc">Go to Dashboard</div></div>
+        <div class="kbd-keys"><kbd>H</kbd></div>
+      </div>
+      <div class="kbd-row">
+        <div><div class="k-desc">Go to Settings</div></div>
+        <div class="kbd-keys"><kbd>S</kbd></div>
+      </div>
+      <div class="kbd-row">
+        <div><div class="k-desc">Go to Diagnostics</div></div>
+        <div class="kbd-keys"><kbd>D</kbd></div>
+      </div>
+      <div class="kbd-row">
+        <div><div class="k-desc">Go to Setup / Wizard</div></div>
+        <div class="kbd-keys"><kbd>U</kbd></div>
+      </div>
+
+      <!-- ── Camera actions ── -->
+      <div class="kbd-section-label">Camera</div>
+      <div class="kbd-row">
+        <div>
+          <div class="k-desc">Open live preview</div>
+          <div class="k-hint">Full-screen snapshot from your GoPro</div>
+        </div>
+        <div class="kbd-keys"><kbd>L</kbd></div>
+      </div>
+      <div class="kbd-row">
+        <div>
+          <div class="k-desc">Pause / Resume stream</div>
+          <div class="k-hint">Holds the last frame while paused</div>
+        </div>
+        <div class="kbd-keys"><kbd>P</kbd></div>
+      </div>
+      <div class="kbd-row">
+        <div>
+          <div class="k-desc">Toggle webcam visibility</div>
+          <div class="k-hint">Show or hide camera in other apps</div>
+        </div>
+        <div class="kbd-keys"><kbd>V</kbd></div>
+      </div>
+      <div class="kbd-row">
+        <div>
+          <div class="k-desc">Force reconnect camera</div>
+          <div class="k-hint">Use if stream stalls or camera disconnects</div>
+        </div>
+        <div class="kbd-keys"><kbd>R</kbd></div>
+      </div>
+
+      <!-- ── Interface ── -->
+      <div class="kbd-section-label">Interface</div>
+      <div class="kbd-row">
+        <div><div class="k-desc">Show / hide this panel</div></div>
+        <div class="kbd-keys"><kbd>?</kbd></div>
+      </div>
+      <div class="kbd-row">
+        <div><div class="k-desc">Close overlay or modal</div></div>
+        <div class="kbd-keys"><kbd class="wide">Esc</kbd></div>
+      </div>
+
+      <div class="kbd-panel-footer">
+        <span>Shortcuts work everywhere except text fields</span>
+        <button class="btn btn-sm" @click="showShortcuts = false">Close</button>
+      </div>
+    </div>
+  </div>
+</template>
+
 <!-- ── Bundled Alpine.js (local, no CDN) ── -->
 <script defer src="/static/alpine.min.js"></script>
 
@@ -967,13 +1330,21 @@ function dashboard() {
     // ── Navigation ──
     page: 'home',
     showPreview: false,
+    showShortcuts: false,
+
+    // ── Toasts ──
+    toasts: [],
+    _toastId: 0,
 
     // ── Status ──
     status: {
-      state: 'paused', state_label: 'Idle',
+      state: 'paused', state_label: 'Waiting for GoPro…',
+      hint: 'Turn on your camera and plug in USB, or connect via WiFi.',
       camera_model: null, battery: null,
       resolution: null, transport: null,
     },
+    _lastConnState: 'DISCONNECTED',
+    _lastPipeState: 'STOPPED',
     uptime: '0s',
     controls: { resolution: '1080p', fov: 'wide' },
     transport: { priority: ['USB', 'COHN', 'WiFi AP'] },
@@ -997,6 +1368,14 @@ function dashboard() {
     _charts: {},
     _sse: null,
     _startTime: Date.now(),
+    _vcamHidden: false,       // true when virtual camera output is blanked via V key
+
+    // ── SSE reconnection state ──
+    sseConnected: false,   // true once first message received after connect
+    sseCountdown: 0,       // seconds until next reconnect attempt (shown in UI)
+    _sseDelay: 1000,       // current backoff delay in ms (starts at 1s, doubles each failure)
+    _sseAttempts: 0,       // consecutive failed reconnect attempts
+    _sseReconnectTimer: null,  // handle for pending reconnect setTimeout
 
     // ── Init ──
     init() {
@@ -1014,6 +1393,7 @@ function dashboard() {
       });
       this._connectSSE();
       this._loadSettings();
+      this._setupKeyboard();
       setInterval(function () { self._updateUptime(); }, 1000);
       // Record transport timeline
       setInterval(function () { self._recordTimeline(); }, 2000);
@@ -1036,51 +1416,482 @@ function dashboard() {
       }).catch(function () {});
     },
 
-    // ── SSE ──
+    // ── Toast notification helper ──
+    _toast(message, type, duration) {
+      var self = this;
+      var id = ++this._toastId;
+      var icons = { success: '✓', error: '✕', info: 'ℹ' };
+      this.toasts.push({ id: id, message: message, type: type || 'info', icon: icons[type] || 'ℹ' });
+      setTimeout(function () {
+        self.toasts = self.toasts.filter(function (t) { return t.id !== id; });
+      }, duration || 3000);
+    },
+
+    // ── Keyboard shortcuts ──
+    _setupKeyboard() {
+      var self = this;
+      document.addEventListener('keydown', function (e) {
+        // Skip when user is typing in an input/textarea/select
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+        // Skip if any modifier key is held (Ctrl, Alt, Meta) — don't interfere with browser shortcuts
+        if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+        switch (e.key) {
+          // ── Navigation shortcuts ──
+          case 'h':
+          case 'H':
+            e.preventDefault();
+            self.page = 'home';
+            self._toast('Dashboard', 'info', 1500);
+            break;
+
+          case 's':
+          case 'S':
+            e.preventDefault();
+            self.page = 'settings';
+            self._toast('Settings', 'info', 1500);
+            break;
+
+          case 'd':
+          case 'D':
+            e.preventDefault();
+            self.page = 'diagnostics';
+            self._toast('Diagnostics', 'info', 1500);
+            break;
+
+          case 'u':
+          case 'U':
+            e.preventDefault();
+            self.page = 'setup';
+            self._toast('Setup', 'info', 1500);
+            break;
+
+          // ── Camera action shortcuts ──
+          case 'l':
+          case 'L':
+            e.preventDefault();
+            self.showPreview = !self.showPreview;
+            break;
+
+          case 'p':
+          case 'P':
+            e.preventDefault();
+            self.togglePause();
+            break;
+
+          case 'v':
+          case 'V':
+            e.preventDefault();
+            self.toggleVisibility();
+            break;
+
+          case 'r':
+          case 'R':
+            e.preventDefault();
+            self.reconnect();
+            break;
+
+          // ── UI shortcuts ──
+          case '?':
+            e.preventDefault();
+            self.showShortcuts = !self.showShortcuts;
+            break;
+
+          case 'Escape':
+            if (self.showShortcuts) { e.preventDefault(); self.showShortcuts = false; }
+            else if (self.showPreview) { e.preventDefault(); self.showPreview = false; }
+            break;
+        }
+      });
+    },
+
+    // ── Pause / Resume stream (P key) ──
+    togglePause() {
+      var self = this;
+      var currentlyStreaming = this.status.state === 'streaming';
+      var currentlyFrozen = this.status.state === 'freeze_frame' || this.status.state === 'paused_user';
+      var wantPause = currentlyStreaming;
+
+      apiPost('/api/camera/pause', { paused: wantPause })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (data.ok) {
+            if (data.paused) {
+              self._toast('Stream paused — last frame held', 'info');
+            } else {
+              self._toast('Stream resumed', 'success');
+            }
+          } else {
+            self._toast(data.error || 'Could not toggle pause', 'error');
+          }
+        })
+        .catch(function (e) { self._toast('Request failed: ' + (e.message || 'network error'), 'error'); });
+    },
+
+    // ── Force reconnect (R key) ──
+    reconnect() {
+      var self = this;
+      self._toast('Reconnecting to camera…', 'info');
+      apiPost('/api/camera/reconnect', {})
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (data.ok) {
+            self._toast('Reconnect started — please wait', 'success', 4000);
+          } else {
+            self._toast(data.error || 'Reconnect failed', 'error');
+          }
+        })
+        .catch(function (e) { self._toast('Request failed: ' + (e.message || 'network error'), 'error'); });
+    },
+
+    // ── Toggle virtual camera visibility (V key) ──
+    // Hides or shows the GoMaxWebcam virtual camera from apps like OBS and
+    // video-call software — without disconnecting the GoPro or stopping decode.
+    // When hidden the virtual camera outputs a blank (black) frame so apps
+    // see a connected but blank camera rather than the last GoPro frame.
+    toggleVisibility() {
+      var self = this;
+      var wantHide = !self._vcamHidden;
+      apiPost('/api/camera/visibility', { hidden: wantHide })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (data.ok) {
+            self._vcamHidden = data.hidden;
+            if (data.hidden) {
+              self._toast('Virtual camera hidden — apps see a blank feed', 'info');
+            } else {
+              self._toast('Virtual camera visible — live feed restored', 'success');
+            }
+          } else {
+            self._toast(data.error || 'Could not toggle visibility', 'error');
+          }
+        })
+        .catch(function (e) { self._toast('Request failed: ' + (e.message || 'network error'), 'error'); });
+    },
+
+    // ── SSE with exponential backoff reconnection ──
     _connectSSE() {
       var self = this;
+
+      // Clear any pending reconnect timer before starting a fresh connection
+      if (self._sseReconnectTimer !== null) {
+        clearTimeout(self._sseReconnectTimer);
+        self._sseReconnectTimer = null;
+      }
+
       var url = '/api/status/stream' + (TOKEN ? '?token=' + encodeURIComponent(TOKEN) : '');
       var es = new EventSource(url);
-      this._sse = es;
-      es.onmessage = function (e) { try { self._applyUpdate(JSON.parse(e.data)); } catch (err) {} };
-      es.addEventListener('status', function (e) { try { self._applyUpdate(JSON.parse(e.data)); } catch (err) {} });
+      self._sse = es;
+
+      // Track whether this connection has ever delivered a message — used to
+      // decide whether to reset the backoff counter on success.
+      var receivedFirstMessage = false;
+
+      function _onMessage(e) {
+        // First successful message resets backoff to initial values
+        if (!receivedFirstMessage) {
+          receivedFirstMessage = true;
+          self.sseConnected = true;
+          self._sseDelay = 1000;   // reset to 1 s for next failure
+          self._sseAttempts = 0;
+          self.sseCountdown = 0;
+        }
+        try { self._applyUpdate(JSON.parse(e.data)); } catch (err) {}
+      }
+
+      es.onmessage = _onMessage;
+      es.addEventListener('status', _onMessage);
+
       es.onerror = function () {
-        self.status.state = 'error'; self.status.state_label = 'Disconnected';
+        // Close the broken connection first
         es.close();
-        setTimeout(function () { self._connectSSE(); }, 3000);
+        self._sse = null;
+        self.sseConnected = false;
+        self._sseAttempts += 1;
+
+        // Exponential backoff: 1s → 2s → 4s → 8s → 16s → 30s (capped)
+        // Add ±10 % jitter to avoid thundering-herd on multi-tab scenarios
+        var baseDelay = Math.min(self._sseDelay * Math.pow(2, self._sseAttempts - 1), 30000);
+        var jitter    = baseDelay * (0.9 + Math.random() * 0.2);
+        var delay     = Math.round(jitter);
+
+        // Update user-facing status
+        self.status.state       = 'error';
+        self.status.state_label = 'Dashboard disconnected';
+        self.sseCountdown = Math.ceil(delay / 1000);
+        self.status.hint  = 'Lost connection to the app \u2014 reconnecting in ' + self.sseCountdown + 's\u2026';
+
+        // Clear any stale countdown timer from a previous rapid onerror
+        if (self._sseCountdownHandle) { clearInterval(self._sseCountdownHandle); }
+
+        // Tick the countdown every second so the hint text stays current
+        self._sseCountdownHandle = setInterval(function () {
+          self.sseCountdown = Math.max(0, self.sseCountdown - 1);
+          if (self.sseCountdown > 0) {
+            self.status.hint = 'Lost connection to the app \u2014 reconnecting in ' + self.sseCountdown + 's\u2026';
+          } else {
+            clearInterval(self._sseCountdownHandle);
+            self._sseCountdownHandle = null;
+          }
+        }, 1000);
+
+        // Schedule the actual reconnect
+        self._sseReconnectTimer = setTimeout(function () {
+          clearInterval(self._sseCountdownHandle);
+          self._sseCountdownHandle = null;
+          self._sseReconnectTimer = null;
+          self._connectSSE();
+        }, delay);
       };
     },
 
     _applyUpdate(d) {
-      if (d.state !== undefined) {
-        this.status.state = d.state;
-        var labels = { streaming: 'Streaming', connecting: 'Connecting', error: 'Error', paused: 'Idle', freeze_frame: 'Switching...' };
-        this.status.state_label = labels[d.state] || d.state;
+      // ── Compute human-readable state from backend CameraStatus fields ──
+      // Backend sends connection_state (DISCONNECTED/CONNECTING/STREAMING) and
+      // pipeline_state (STOPPED/STREAMING/FREEZE_FRAME) as separate uppercase strings.
+      // Since v2 the backend also sends pre-computed state_label / state_hint /
+      // ui_state via status_labels.py — use those when present.
+      var connState = d.connection_state || d.state || this._lastConnState;
+      var pipeState = d.pipeline_state   || this._lastPipeState;
+      var isFrozen  = d.is_frozen !== undefined ? d.is_frozen : false;
+      var lastError = d.last_error || '';
+
+      if (d.connection_state !== undefined) this._lastConnState = d.connection_state;
+      if (d.pipeline_state   !== undefined) this._lastPipeState = d.pipeline_state;
+
+      if (d.state_label !== undefined) {
+        // Backend provided friendly labels — use them directly
+        this.status.state_label = d.state_label;
+        this.status.hint        = d.state_hint || '';
+        this.status.state       = d.ui_state   || this._computeStateInfo(connState, pipeState, lastError, isFrozen).state;
+      } else {
+        // Fallback: compute labels in JS (backward-compat / missing backend labels)
+        var si = this._computeStateInfo(connState, pipeState, lastError, isFrozen);
+        this.status.state       = si.state;
+        this.status.state_label = si.label;
+        this.status.hint        = si.hint;
       }
-      if (d.camera_model !== undefined) this.status.camera_model = d.camera_model;
-      if (d.battery !== undefined) this.status.battery = d.battery;
+
+      // ── Camera info: prefer friendly display form from backend ──
+      // camera_model_display is "GoPro (192.168.1.x)" — friendly formatted.
+      // Fall back to raw camera_model when the display form is absent.
+      if (d.camera_model_display !== undefined)
+        this.status.camera_model = d.camera_model_display || null;
+      else if (d.camera_model !== undefined)
+        this.status.camera_model = this._friendlyCameraModel(d.camera_model) || null;
+
+      // ── Battery: -1 means unknown ──
+      if (d.battery_level !== undefined)
+        this.status.battery = d.battery_level >= 0 ? d.battery_level : null;
+      if (d.battery !== undefined)
+        this.status.battery = d.battery;
+
+      // ── Transport: 'none' means not connected ──
+      if (d.transport_type !== undefined)
+        this.status.transport = (d.transport_type && d.transport_type !== 'none') ? d.transport_type : null;
+      if (d.transport !== undefined)
+        this.status.transport = d.transport || null;
+
       if (d.resolution !== undefined) this.status.resolution = d.resolution;
-      if (d.transport !== undefined) this.status.transport = d.transport;
-      if (d.uptime_seconds !== undefined) this._startTime = Date.now() - d.uptime_seconds * 1000;
+
+      // ── Uptime ──
+      if (d.uptime_s        !== undefined) this._startTime = Date.now() - d.uptime_s * 1000;
+      if (d.uptime_seconds  !== undefined) this._startTime = Date.now() - d.uptime_seconds * 1000;
+
+      // ── Diagnostics ──
       if (d.frame_drops !== undefined) this.diagnostics.frame_drops = d.frame_drops;
-      if (d.decoder_frames !== undefined && d.decoder_dropped !== undefined) {
+      if (d.decoder_frames !== undefined && d.decoder_dropped !== undefined)
         this.diagnostics.frame_drops = d.decoder_dropped || 0;
-      }
       if (d.last_decode_ms !== undefined) {
         if (this._charts.decode) this._charts.decode.push(d.last_decode_ms);
         this.diagnostics.avg_decode_ms = d.avg_decode_ms || 0;
       }
       if (d.decode_time_ms !== undefined && this._charts.decode) this._charts.decode.push(d.decode_time_ms);
-      if (d.decoder_fps !== undefined && this._charts.fps) this._charts.fps.push(d.decoder_fps);
-      if (d.pipeline_fps !== undefined && this._charts.fps) this._charts.fps.push(d.pipeline_fps);
-      if (d.avg_jitter_ms !== undefined) {
+      if (d.decoder_fps    !== undefined && this._charts.fps)    this._charts.fps.push(d.decoder_fps);
+      if (d.pipeline_fps   !== undefined && this._charts.fps)    this._charts.fps.push(d.pipeline_fps);
+      if (d.avg_jitter_ms  !== undefined) {
         this.diagnostics.avg_jitter_ms = d.avg_jitter_ms;
         if (this._charts.jitter) this._charts.jitter.push(d.avg_jitter_ms);
       }
-      if (d.drop_rate !== undefined) this.diagnostics.drop_rate = d.drop_rate;
+      if (d.drop_rate       !== undefined) this.diagnostics.drop_rate = d.drop_rate;
       if (d.pipeline_health !== undefined) this.diagnostics.health = d.pipeline_health;
       if (d.resolution) { var m = d.resolution.match(/(\d+p)/); if (m) this.controls.resolution = m[1]; }
       if (d.fov) this.controls.fov = d.fov;
+    },
+
+    // ── Translate raw backend state names to user-facing text ──
+    // This mirrors status_labels.py (Python) for resilience.  When the
+    // backend sends pre-computed state_label / state_hint / ui_state fields
+    // this function is used only as a fallback.
+    _computeStateInfo(connState, pipeState, lastError, isFrozen) {
+      var conn = (connState || '').toUpperCase().trim();
+      var pipe = (pipeState  || '').toUpperCase().trim();
+
+      // No camera / idle
+      if (!conn || conn === 'DISCONNECTED' || conn === 'NONE') {
+        return {
+          state: 'paused',
+          label: 'Waiting for GoPro\u2026',
+          hint:  'Turn on your camera and plug in a USB cable, or connect via Wi\u2011Fi.',
+        };
+      }
+
+      // Startup / discovery
+      if (conn === 'INITIALIZING' || conn === 'DISCOVERY') {
+        return {
+          state: 'connecting',
+          label: 'Starting up\u2026',
+          hint:  'Initialising connection to your GoPro \u2014 this only takes a moment.',
+        };
+      }
+
+      // Connection attempts
+      if (conn === 'CONNECTING' || conn === 'PROVISIONING') {
+        return {
+          state: 'connecting',
+          label: 'Connecting to camera\u2026',
+          hint:  'Make sure the camera is powered on and within range.',
+        };
+      }
+      if (conn === 'RECONNECTING' || conn === 'RETRYING') {
+        return {
+          state: 'connecting',
+          label: 'Reconnecting\u2026',
+          hint:  'Lost connection \u2014 trying again automatically. No action needed.',
+        };
+      }
+      if (conn === 'AUTHENTICATING') {
+        return {
+          state: 'connecting',
+          label: 'Authenticating\u2026',
+          hint:  'Verifying your GoPro credentials \u2014 this only takes a moment.',
+        };
+      }
+
+      // User-initiated pause
+      if (conn === 'PAUSED' || conn === 'PAUSED_USER') {
+        return {
+          state: 'paused',
+          label: 'Stream paused',
+          hint:  'Press \u00ABP\u00BB or click Resume to start the live stream again.',
+        };
+      }
+
+      // Credential / auth errors
+      if (conn === 'AUTH_FAILED') {
+        return {
+          state: 'error',
+          label: 'Authentication failed',
+          hint:  'Your camera rejected the credentials. Re-run the Setup wizard to fix this.',
+        };
+      }
+      if (conn === 'NO_CREDENTIALS') {
+        return {
+          state: 'error',
+          label: 'Camera credentials not found',
+          hint:  'Go to the Setup page and run the COHN Setup Wizard to configure your camera.',
+        };
+      }
+      if (conn === 'TIMEOUT') {
+        return {
+          state: 'error',
+          label: 'Connection timed out',
+          hint:  'The camera took too long to respond. Check it is powered on and press \u00ABR\u00BB to reconnect.',
+        };
+      }
+
+      // Generic error / failed
+      if (conn === 'ERROR' || conn === 'FAILED') {
+        return {
+          state: 'error',
+          label: 'Connection error',
+          hint:  this._friendlyError(lastError) ||
+                 'Check that your camera is on and reachable, then press \u00ABR\u00BB to reconnect.',
+        };
+      }
+
+      // Connected / streaming
+      if (conn === 'STREAMING' || conn === 'CONNECTED') {
+        if (isFrozen || pipe === 'FREEZE_FRAME') {
+          return {
+            state: 'freeze_frame',
+            label: 'Switching connection\u2026',
+            hint:  'Brief pause while the app switches to the best available connection.',
+          };
+        }
+        if (pipe === 'STREAMING') {
+          return { state: 'streaming', label: 'Live \u2014 Streaming', hint: '' };
+        }
+        if (pipe === 'STARTING' || pipe === 'STOPPED' || pipe === 'INITIALIZING') {
+          return {
+            state: 'connecting',
+            label: 'Starting video pipeline\u2026',
+            hint:  'Connected to camera \u2014 setting up the video stream.',
+          };
+        }
+        if (pipe === 'PAUSED') {
+          return {
+            state: 'paused',
+            label: 'Stream paused',
+            hint:  'Camera connected. Press \u00ABP\u00BB to resume live streaming.',
+          };
+        }
+        if (pipe === 'ERROR') {
+          return {
+            state: 'error',
+            label: 'Video pipeline error',
+            hint:  'The video stream stopped unexpectedly. Press \u00ABR\u00BB to reconnect.',
+          };
+        }
+        // Connected, unknown pipeline state
+        return {
+          state: 'connecting',
+          label: 'Camera connected',
+          hint:  'Preparing video stream\u2026',
+        };
+      }
+
+      // Catch-all: prettify the raw state name for display
+      var pretty = conn.charAt(0) + conn.slice(1).toLowerCase().replace(/_/g, ' ');
+      return {
+        state: 'paused',
+        label: pretty,
+        hint:  'Unexpected state. Try reconnecting (\u00ABR\u00BB) if this persists.',
+      };
+    },
+
+    // ── Sanitise a raw Python exception string for user display ──
+    _friendlyError(rawError) {
+      if (!rawError) return '';
+      var e = rawError.toLowerCase();
+      if (e.indexOf('connection refused') >= 0 || e.indexOf('winerror 10061') >= 0)
+        return 'Unable to reach the camera \u2014 check USB or Wi\u2011Fi connection.';
+      if (e.indexOf('timed out') >= 0 || e.indexOf('timeout') >= 0)
+        return 'Camera took too long to respond \u2014 check it is powered on.';
+      if (e.indexOf('network unreachable') >= 0 || e.indexOf('no route to host') >= 0)
+        return 'Network unreachable \u2014 check your Wi\u2011Fi or USB cable.';
+      if (e.indexOf('connection reset') >= 0 || e.indexOf('broken pipe') >= 0)
+        return 'Connection was interrupted \u2014 trying to reconnect automatically.';
+      if (e.indexOf('401') >= 0 || e.indexOf('unauthorized') >= 0 || e.indexOf('credentials') >= 0)
+        return 'Authentication failed \u2014 re-run the Setup wizard to refresh credentials.';
+      if (e.indexOf('no such device') >= 0 || e.indexOf('device not found') >= 0)
+        return 'Camera not detected \u2014 try unplugging and replugging the USB cable.';
+      if (e.indexOf('permission denied') >= 0 || e.indexOf('access is denied') >= 0)
+        return 'Permission denied \u2014 another app may be using the camera.';
+      return 'Connection error \u2014 check your camera is on and try reconnecting (\u00ABR\u00BB).';
+    },
+
+    // ── Format raw camera model string for display ──
+    // "GoPro@192.168.1.50" → "GoPro (192.168.1.50)"
+    _friendlyCameraModel(raw) {
+      if (!raw) return '';
+      var idx = raw.indexOf('@');
+      if (idx >= 0) {
+        var name = raw.slice(0, idx).trim();
+        var addr = raw.slice(idx + 1).trim();
+        return addr ? name + ' (' + addr + ')' : name;
+      }
+      return raw;
     },
 
     _updateUptime() {
@@ -1125,6 +1936,69 @@ function dashboard() {
     },
     saveAutoStart() {
       apiPost('/api/settings/auto-start', { enabled: this.settings.auto_start });
+    },
+
+    // ── Camera connection indicator helpers ──
+    // Returns the CSS modifier class for the camera dot / brand dot
+    _camDotClass() {
+      if (!this.sseConnected) return 'cam-idle';
+      var s = this.status.state;
+      if (s === 'streaming')                           return 'cam-live';
+      if (s === 'connecting' || s === 'freeze_frame')  return 'cam-reconnecting';
+      if (s === 'error')                               return 'cam-error';
+      return 'cam-idle';  // paused / unknown
+    },
+
+    // Returns the short text label for the camera status line in the sidebar
+    _camLabel() {
+      if (!this.sseConnected) return 'No Signal';
+      var s = this.status.state;
+      if (s === 'streaming')    return 'Camera Live';
+      if (s === 'connecting')   return 'Connecting\u2026';
+      if (s === 'freeze_frame') return 'Switching\u2026';
+      if (s === 'error')        return 'Camera Error';
+      return 'No Camera';  // paused / idle
+    },
+
+    // Returns the tooltip text for the camera dot and brand dot
+    _camDotTitle() {
+      if (!this.sseConnected) return 'No signal \u2014 dashboard not connected to app';
+      var s = this.status.state;
+      if (s === 'streaming')    return 'GoPro is live \u2014 streaming to virtual camera';
+      if (s === 'connecting')   return 'Connecting to GoPro\u2026';
+      if (s === 'freeze_frame') return 'Switching transport \u2014 brief pause';
+      if (s === 'error')        return (this.status.hint || 'Camera connection error');
+      return 'No camera detected \u2014 plug in USB or enable WiFi';
+    },
+
+    // ── SSE connection indicator helpers ──
+    // Returns CSS class for the live-feed dot: 'connected' | 'reconnecting' | 'disconnected'
+    _sseDotClass() {
+      if (this.sseConnected) return 'connected';
+      if (this._sseAttempts > 0) return 'reconnecting';
+      return 'disconnected';  // initial state — never yet connected
+    },
+
+    // Short label shown next to the SSE dot in the sidebar footer
+    _sseStatusLabel() {
+      if (this.sseConnected) return 'Live';
+      if (this._sseAttempts > 0) {
+        return this.sseCountdown > 0
+          ? 'Reconnecting in ' + this.sseCountdown + 's\u2026'
+          : 'Reconnecting\u2026';
+      }
+      return 'Connecting\u2026';
+    },
+
+    // Tooltip text for the SSE indicator
+    _sseStatusTitle() {
+      if (this.sseConnected) return 'Dashboard live feed active';
+      if (this._sseAttempts > 0) {
+        return this.sseCountdown > 0
+          ? 'Connection lost \u2014 retrying in ' + this.sseCountdown + 's'
+          : 'Reconnecting to dashboard\u2026';
+      }
+      return 'Connecting to dashboard\u2026';
     },
 
     // ── Export diagnostics ──

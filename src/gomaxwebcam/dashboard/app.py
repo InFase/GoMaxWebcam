@@ -30,6 +30,7 @@ Security:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 from pathlib import Path
@@ -158,10 +159,23 @@ def create_app(
             except ValueError:
                 pass  # Invalid type names are ignored, subscribe to all
 
+        # Support Last-Event-ID header for resuming after reconnection.
+        # The browser EventSource API sends this header automatically whenever
+        # the connection is re-established after a drop, using the last ``id:``
+        # field received from the server.
+        since_event_id: Optional[int] = None
+        last_event_id_header = request.headers.get("last-event-id", "").strip()
+        if last_event_id_header:
+            try:
+                since_event_id = int(last_event_id_header)
+            except ValueError:
+                log.debug("Ignoring invalid Last-Event-ID header: %r", last_event_id_header)
+
         async def event_generator() -> AsyncGenerator[str, None]:
             subscription = bus.subscribe(
                 event_types=event_types,
                 include_history=include_history,
+                since_event_id=since_event_id,
             )
             try:
                 async for event in subscription:
@@ -494,13 +508,11 @@ def create_app(
         Persists to config.toml.
         """
         body = await request.json()
-        enabled = body.get("enabled", False)
+        enabled = bool(body.get("enabled", False))
 
         cfg = _load_config(request)
         if cfg:
-            if not hasattr(cfg.dashboard, "auto_start"):
-                # DashboardSection doesn't have auto_start yet, store in advanced
-                pass
+            cfg.dashboard.auto_start = enabled
             cfg.save()
 
         log.info("Auto-start set to %s", enabled)
@@ -526,13 +538,17 @@ def create_app(
                 content={"error": "Config not available"},
             )
 
+        _VALID_BLE_WAKE_MODES = {"always_on", "battery_saver"}
         if "ble_wake_mode" in body:
-            cfg.transport.ble_wake_mode = body["ble_wake_mode"]
+            mode = body["ble_wake_mode"]
+            if mode in _VALID_BLE_WAKE_MODES:
+                cfg.transport.ble_wake_mode = mode
+            else:
+                log.warning("Ignoring invalid ble_wake_mode=%r", mode)
         if "debug_logging" in body:
             cfg.logging.debug = bool(body["debug_logging"])
         if "auto_start" in body:
-            # Store auto_start in dashboard section or as needed
-            pass
+            cfg.dashboard.auto_start = bool(body["auto_start"])
 
         cfg.save()
         log.info("Settings updated: %s", list(body.keys()))
@@ -562,9 +578,133 @@ def create_app(
                 "transport_priority": cfg.transport.priority,
                 "ble_wake_mode": cfg.transport.ble_wake_mode,
                 "debug_logging": cfg.logging.debug,
+                "auto_start": cfg.dashboard.auto_start,
+                "open_browser_on_start": cfg.dashboard.open_browser_on_start,
+                "udp_port": cfg.advanced.udp_port,
             },
             "transport_status": tm_status,
         })
+
+    # -- Keyboard shortcut action endpoints --
+
+    @app.post("/api/camera/pause")
+    async def toggle_pause(
+        request: Request,
+        _auth: None = Depends(verify_token),
+    ) -> JSONResponse:
+        """Toggle stream pause / resume via the keyboard shortcut (P key).
+
+        Uses the pipeline freeze/unfreeze mechanism:
+        - pause=true  → pipeline.freeze()  — holds last frame in virtual camera
+        - pause=false → pipeline.unfreeze() — resumes on next decoded frame
+
+        Body: {"paused": true|false}
+
+        If no pipeline is active (camera not connected), returns ok=true with a
+        detail message so the frontend can display a friendly toast.
+        """
+        body = await request.json()
+        want_pause = bool(body.get("paused", True))
+
+        orch = getattr(request.app.state, "orchestrator", None)
+        pipeline = getattr(orch, "pipeline", None) if orch else None
+
+        if pipeline is None:
+            return JSONResponse(content={
+                "ok": True,
+                "paused": want_pause,
+                "detail": "No active pipeline — connect a camera first",
+            })
+
+        if want_pause:
+            pipeline.freeze()
+            log.info("Stream paused via keyboard shortcut")
+        else:
+            pipeline.unfreeze()
+            log.info("Stream resumed via keyboard shortcut")
+
+        return JSONResponse(content={"ok": True, "paused": want_pause})
+
+    @app.post("/api/camera/reconnect")
+    async def reconnect_camera(
+        request: Request,
+        _auth: None = Depends(verify_token),
+    ) -> JSONResponse:
+        """Force a camera reconnect via the keyboard shortcut (R key).
+
+        Triggers a transport failover cycle so the app re-discovers and
+        reconnects the best available transport (USB → COHN → WiFi AP).
+
+        Returns immediately — the reconnect happens asynchronously and
+        status updates arrive via the SSE stream.
+        """
+        orch = getattr(request.app.state, "orchestrator", None)
+        if not orch:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "App not fully started yet — try again in a moment"},
+            )
+
+        tm = getattr(orch, "transport_manager", None)
+        if not tm:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "Transport manager not available"},
+            )
+
+        # Fire the failover asynchronously so we return immediately.
+        # Empty string → use the priority list rather than a specific transport.
+        async def _safe_reconnect():
+            try:
+                await tm.force_failover("")
+            except Exception as e:
+                log.error("Keyboard reconnect failed: %s", e, exc_info=True)
+
+        asyncio.create_task(_safe_reconnect(), name="kbd-reconnect")
+        log.info("Reconnect triggered via keyboard shortcut")
+        return JSONResponse(content={"ok": True, "detail": "Reconnecting…"})
+
+    @app.post("/api/camera/visibility")
+    async def toggle_visibility(
+        request: Request,
+        _auth: None = Depends(verify_token),
+    ) -> JSONResponse:
+        """Toggle virtual camera output visibility (V key).
+
+        When hidden the virtual camera outputs a blank (black) frame so apps
+        like OBS still see a connected camera but receive no live content.
+        When visible the live GoPro feed is restored to the virtual camera.
+
+        This is distinct from pause (P key), which holds the last frame.
+        Visibility lets the user blank the virtual camera without stopping
+        decode or disconnecting the GoPro.
+
+        Body: {"hidden": true|false}
+
+        If no pipeline is active, returns ok=true with an explanatory detail
+        so the frontend can display a friendly toast.
+        """
+        body = await request.json()
+        want_hidden = bool(body.get("hidden", True))
+
+        orch = getattr(request.app.state, "orchestrator", None)
+        pipeline = getattr(orch, "pipeline", None) if orch else None
+
+        if pipeline is None:
+            return JSONResponse(content={
+                "ok": True,
+                "hidden": want_hidden,
+                "detail": "No active pipeline — connect a camera first",
+            })
+
+        if want_hidden:
+            pipeline.hide()
+            log.info("Virtual camera hidden via keyboard shortcut")
+        else:
+            pipeline.show()
+            log.info("Virtual camera shown via keyboard shortcut")
+
+        return JSONResponse(content={"ok": True, "hidden": want_hidden})
 
     # -- Health (no auth required) --
 

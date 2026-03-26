@@ -247,6 +247,12 @@ class FramePipeline:
         # Freeze detection: tracks whether the vcam sink is in freeze mode
         self._was_frozen = False
 
+        # Visibility: when True the virtual camera outputs blank (black) frames
+        # instead of the live GoPro feed. The GoPro decode continues normally
+        # so resuming is instant. Thread-safe: set/read under Python GIL.
+        self._hidden: bool = False
+        self._blank_frame: Optional[np.ndarray] = None  # cached blank frame
+
         # Callbacks
         self.on_state_change: Optional[Callable[[PipelineState], None]] = None
         self.on_freeze: Optional[Callable[[], None]] = None
@@ -494,10 +500,21 @@ class FramePipeline:
         to the VirtualCameraSink's bounded queue. If the queue is full,
         the sink drops the oldest frame (newest-wins backpressure).
 
+        When ``_hidden`` is True, a blank (all-zero / black) frame of the
+        same shape and dtype is submitted instead of the live GoPro frame.
+        This lets the user blank the virtual camera output without stopping
+        decode or disconnecting the GoPro — resuming is instantaneous.
+
         This runs on the decode thread — must be fast and non-blocking.
         """
         if self._vcam_sink is not None:
-            self._vcam_sink.submit_frame(frame)
+            if self._hidden:
+                # Reuse cached blank frame to avoid 6MB allocation per frame at 30fps
+                if self._blank_frame is None or self._blank_frame.shape != frame.shape:
+                    self._blank_frame = np.zeros_like(frame)
+                self._vcam_sink.submit_frame(self._blank_frame)
+            else:
+                self._vcam_sink.submit_frame(frame)
 
             # Track freeze→unfreeze transitions
             if self._was_frozen:
@@ -596,6 +613,32 @@ class FramePipeline:
         # re-sending freeze-frames.  State transitions to STREAMING
         # only when _on_decoded_frame receives a real frame, which
         # resets _was_frozen and fires on_unfreeze.
+
+    # -- Visibility (called by dashboard V key shortcut) --
+
+    def hide(self) -> None:
+        """Blank the virtual camera output without stopping the GoPro stream.
+
+        After this call, downstream apps (OBS, Zoom, Teams) receive all-black
+        frames instead of the live GoPro feed.  The GoPro decode loop continues
+        running normally so that calling ``show()`` restores the live feed
+        immediately without any reconnection delay.
+
+        Safe to call from any thread.
+        """
+        self._hidden = True
+        log.info("Pipeline: virtual camera output hidden (blank frames)")
+
+    def show(self) -> None:
+        """Restore live GoPro frames to the virtual camera output.
+
+        Reverses the effect of ``hide()``.  The next decoded frame from the
+        GoPro will flow through to downstream apps immediately.
+
+        Safe to call from any thread.
+        """
+        self._hidden = False
+        log.info("Pipeline: virtual camera output restored (live frames)")
 
     # -- State --
 

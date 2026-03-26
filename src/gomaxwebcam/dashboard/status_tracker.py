@@ -66,8 +66,32 @@ class CameraStatus:
     timestamp: float = 0.0
 
     def to_sse_data(self) -> str:
-        """Serialize to JSON string for SSE data field."""
-        return json.dumps(asdict(self), default=str)
+        """Serialize to JSON string for SSE data field.
+
+        Includes computed ``state_label``, ``state_hint``, ``ui_state``, and
+        ``camera_model_display`` fields so the frontend can display
+        human-readable status text without additional translation logic.
+        """
+        from gomaxwebcam.dashboard.status_labels import (
+            compute_status_info,
+            friendly_camera_model,
+        )
+
+        data = asdict(self)
+
+        # Append friendly labels for the dashboard UI
+        labels = compute_status_info(
+            self.connection_state,
+            self.pipeline_state,
+            self.last_error,
+            self.is_frozen,
+        )
+        data.update(labels)  # state_label, state_hint, ui_state
+
+        # Friendly camera model display (e.g. "GoPro@1.2.3.4" → "GoPro (1.2.3.4)")
+        data["camera_model_display"] = friendly_camera_model(self.camera_model)
+
+        return json.dumps(data, default=str)
 
     def has_changed(self, other: CameraStatus) -> bool:
         """Check if status has meaningfully changed (ignoring timestamp)."""

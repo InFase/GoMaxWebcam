@@ -905,12 +905,14 @@ class TestCameraManagerIntegration:
         event = await asyncio.wait_for(sub.__anext__(), timeout=1.0)
         sse_str = event.to_sse()
 
-        # Validate SSE format
+        # Validate SSE format — published events get a sequential ID so the
+        # output now starts with an "id:" line followed by "event:" and "data:".
         lines = sse_str.split("\n")
-        assert lines[0].startswith("event: ")
-        assert lines[1].startswith("data: ")
-        assert lines[2] == ""  # Empty line delimiter
-        assert lines[3] == ""  # Trailing empty line
+        assert lines[0].startswith("id: ")      # Sequential event ID
+        assert lines[1].startswith("event: ")
+        assert lines[2].startswith("data: ")
+        assert lines[3] == ""  # Empty line delimiter
+        assert lines[4] == ""  # Trailing empty line
 
         bus.unsubscribe(sub)
 

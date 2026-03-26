@@ -29,7 +29,7 @@ import asyncio
 import json
 import logging
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, replace as dataclass_replace
 from enum import Enum
 from typing import Any, Optional
 
@@ -57,27 +57,46 @@ class Event:
         type: Event category (maps to SSE 'event:' field).
         data: Event payload (JSON-serializable dict).
         timestamp: Monotonic timestamp of event creation.
+        id: Sequential event ID assigned by the EventBus on publish.
+            A value of 0 means no ID has been assigned yet.
+            Clients can use the Last-Event-ID header to resume from this ID.
     """
     type: EventType
     data: dict[str, Any] = field(default_factory=dict)
     timestamp: float = field(default_factory=time.monotonic)
+    id: int = 0
 
     def to_sse(self) -> str:
         """Format as an SSE message string.
 
         Returns:
-            SSE-formatted string: 'event: <type>\\ndata: <json>\\n\\n'
+            SSE-formatted string with id, event type, and data fields.
+            If the event has an assigned ID (> 0), the ``id:`` field is
+            included so browsers can track the last received event and
+            send ``Last-Event-ID`` on reconnect.
+
+        Example output::
+
+            id: 42
+            event: battery
+            data: {"level": 85, "charging": false}
+
         """
         json_data = json.dumps(self.data, default=str)
+        if self.id:
+            return f"id: {self.id}\nevent: {self.type.value}\ndata: {json_data}\n\n"
         return f"event: {self.type.value}\ndata: {json_data}\n\n"
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict."""
-        return {
+        d: dict[str, Any] = {
             "type": self.type.value,
             "data": self.data,
             "timestamp": self.timestamp,
         }
+        if self.id:
+            d["id"] = self.id
+        return d
 
 
 # -- Convenience event constructors --
@@ -297,8 +316,15 @@ class EventBus:
 
         Safe to call from any thread. If called from a non-asyncio thread,
         the event is scheduled on the event loop via call_soon_threadsafe.
+
+        A sequential integer ID is assigned to the event before dispatch so
+        clients can reference it via ``Last-Event-ID`` on reconnect.
         """
         self._event_count += 1
+
+        # Assign a unique sequential ID so clients can resume with Last-Event-ID
+        if event.id == 0:
+            event = dataclass_replace(event, id=self._event_count)
 
         # Maintain bounded history
         self._history.append(event)
@@ -364,13 +390,21 @@ class EventBus:
         self,
         event_types: Optional[set[EventType]] = None,
         include_history: bool = False,
+        since_event_id: Optional[int] = None,
     ) -> EventSubscription:
         """Create a new SSE subscription.
 
         Args:
             event_types: If provided, only receive events of these types.
                          None = receive all events.
-            include_history: If True, replay recent events on subscribe.
+            include_history: If True, replay all recent events on subscribe.
+            since_event_id: If provided, replay only history events whose
+                ``id`` is strictly greater than this value.  Clients should
+                pass the value received from the ``Last-Event-ID`` header on
+                reconnect.  Takes precedence over ``include_history`` for
+                the history replay logic: when ``since_event_id`` is set,
+                only missed events (id > since_event_id) are replayed even
+                if ``include_history`` is False.
 
         Returns:
             An async iterator that yields Event objects.
@@ -380,8 +414,18 @@ class EventBus:
         )
         self._subscribers.append(q)
 
-        # Optionally replay history
-        if include_history:
+        # Determine which history events to replay
+        if since_event_id is not None:
+            # Resume mode: only replay events the client hasn't seen yet
+            for evt in self._history:
+                if evt.id > since_event_id:
+                    if event_types is None or evt.type in event_types:
+                        try:
+                            q.put_nowait(evt)
+                        except asyncio.QueueFull:
+                            break
+        elif include_history:
+            # Full history replay
             for evt in self._history:
                 if event_types is None or evt.type in event_types:
                     try:
@@ -390,9 +434,10 @@ class EventBus:
                         break
 
         log.debug(
-            "New subscriber (total=%d, filter=%s)",
+            "New subscriber (total=%d, filter=%s, since_id=%s)",
             len(self._subscribers),
             event_types or "all",
+            since_event_id,
         )
 
         return EventSubscription(q, self._subscribers, event_types)
