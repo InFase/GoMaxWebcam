@@ -324,14 +324,20 @@ def main() -> None:
         print(f"Dashboard URL: {dashboard_url}", flush=True)
 
     # Open the dashboard automatically on startup when configured and not headless.
-    # A short delay lets uvicorn finish binding before the browser hits the URL.
+    # Poll until the server is actually accepting connections before opening browser.
     if cfg.dashboard.open_browser_on_start and not headless:
-        def _open_browser_deferred() -> None:
+        def _open_browser_when_ready() -> None:
             import time as _time
-            _time.sleep(1.5)
+            for _ in range(30):  # max 15 seconds
+                _time.sleep(0.5)
+                try:
+                    with socket.create_connection(("127.0.0.1", port), timeout=1):
+                        break  # Server is ready
+                except (ConnectionRefusedError, OSError):
+                    continue
             webbrowser.open(dashboard_url)
         threading.Thread(
-            target=_open_browser_deferred,
+            target=_open_browser_when_ready,
             name="browser-open",
             daemon=True,
         ).start()
