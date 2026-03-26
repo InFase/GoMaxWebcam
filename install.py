@@ -518,7 +518,134 @@ def _print_summary(
     else:
         info("python install.py   (re-run this script)")
     print()
+    print(f"  {BOLD}Uninstall:{RESET}")
+    info("python install.py --uninstall")
+    print()
+
+
+def uninstall() -> None:
+    """Remove GoMaxWebcam: pip package, shortcuts, config, and cache."""
+    print()
+    print(f"  {BOLD}{RED}GoMaxWebcam Uninstaller{RESET}")
+    print(f"  {DIM}{'=' * 46}{RESET}")
+    print()
+
+    removed = []
+    kept = []
+
+    # 1. Remove desktop shortcuts
+    print(f"  {BOLD}[1/4]{RESET} Removing shortcuts...")
+    desktop = _desktop_path()
+    shortcut_files = []
+    if sys.platform == "win32":
+        shortcut_files = [
+            desktop / "GoMaxWebcam.bat",
+            desktop / "GoMaxWebcam.vbs",
+        ]
+        start_menu = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "GoMaxWebcam.bat"
+        shortcut_files.append(start_menu)
+    elif sys.platform == "darwin":
+        shortcut_files = [desktop / "GoMaxWebcam.command"]
+    else:
+        shortcut_files = [
+            Path.home() / ".local" / "share" / "applications" / "gomaxwebcam.desktop",
+        ]
+
+    for f in shortcut_files:
+        if f.is_file():
+            try:
+                f.unlink()
+                removed.append(f"Shortcut: {f}")
+                info(f"{GREEN}Removed{RESET} {f}")
+            except Exception as e:
+                kept.append(f"Shortcut: {f} ({e})")
+                info(f"{RED}Failed{RESET} {f}: {e}")
+        else:
+            info(f"{DIM}Not found: {f}{RESET}")
+
+    # 2. Remove config directory
+    print(f"\n  {BOLD}[2/4]{RESET} Removing config...")
+    from platformdirs import user_config_dir, user_runtime_dir
+    config_dirs = []
+    try:
+        config_dirs.append(Path(user_config_dir("GoMaxWebcam-v2")))
+    except Exception:
+        pass
+    try:
+        config_dirs.append(Path(user_runtime_dir("GoMaxWebcam-v2")))
+    except Exception:
+        pass
+
+    for d in config_dirs:
+        if d.is_dir():
+            try:
+                shutil.rmtree(d)
+                removed.append(f"Config: {d}")
+                info(f"{GREEN}Removed{RESET} {d}")
+            except Exception as e:
+                kept.append(f"Config: {d} ({e})")
+                info(f"{RED}Failed{RESET} {d}: {e}")
+        else:
+            info(f"{DIM}Not found: {d}{RESET}")
+
+    # 3. Remove cohn_db.json (credential cache)
+    cohn_db = Path.cwd() / "cohn_db.json"
+    if cohn_db.is_file():
+        try:
+            cohn_db.unlink()
+            removed.append(f"Credentials: {cohn_db}")
+            info(f"{GREEN}Removed{RESET} {cohn_db}")
+        except Exception as e:
+            kept.append(f"Credentials: {cohn_db} ({e})")
+
+    # 4. Pip uninstall
+    print(f"\n  {BOLD}[3/4]{RESET} Uninstalling pip package...")
+    try:
+        r = subprocess.run(
+            [sys.executable, "-m", "pip", "uninstall", "gomaxwebcam", "-y"],
+            capture_output=True, text=True, timeout=60,
+        )
+        if r.returncode == 0:
+            removed.append("pip package: gomaxwebcam")
+            info(f"{GREEN}Uninstalled{RESET} gomaxwebcam pip package")
+        else:
+            if "not installed" in r.stderr.lower() or "not installed" in r.stdout.lower():
+                info(f"{DIM}Package not installed via pip{RESET}")
+            else:
+                kept.append(f"pip package ({r.stderr.strip()[:60]})")
+                info(f"{RED}Failed:{RESET} {r.stderr.strip()[:80]}")
+    except Exception as e:
+        kept.append(f"pip package ({e})")
+        info(f"{RED}Failed:{RESET} {e}")
+
+    # 5. Summary
+    print(f"\n  {BOLD}[4/4]{RESET} Summary")
+    print()
+    if removed:
+        print(f"  {GREEN}Removed:{RESET}")
+        for item in removed:
+            info(f"  {item}")
+    if kept:
+        print(f"\n  {YELLOW}Could not remove:{RESET}")
+        for item in kept:
+            info(f"  {item}")
+
+    if not kept:
+        print(f"\n  {BOLD}{GREEN}GoMaxWebcam fully uninstalled.{RESET}")
+    else:
+        print(f"\n  {BOLD}{YELLOW}Partially uninstalled.{RESET} Remove the items above manually.")
+
+    if _in_repo():
+        print(f"\n  {DIM}Note: Source code in {Path.cwd()} was NOT deleted.")
+        print(f"  To remove: delete this folder manually.{RESET}")
+    print()
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] in ("--uninstall", "uninstall", "--remove", "remove"):
+        if _prompt_yn(f"{RED}Uninstall GoMaxWebcam?{RESET} This removes the package, shortcuts, and config.", default_yes=False):
+            uninstall()
+        else:
+            print("  Cancelled.")
+    else:
+        main()
