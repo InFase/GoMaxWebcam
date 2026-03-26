@@ -113,6 +113,7 @@ class TransportFailover:
         # Background tasks
         self._monitor_task: Optional[asyncio.Task] = None
         self._network_task: Optional[asyncio.Task] = None
+        self._backoff_task: Optional[asyncio.Task] = None
         self._running: bool = False
 
         # Timestamp of last received frame (updated externally)
@@ -189,7 +190,7 @@ class TransportFailover:
         self._running = False
         self._state = FailoverState.IDLE
 
-        for task in (self._monitor_task, self._network_task):
+        for task in (self._monitor_task, self._network_task, self._backoff_task):
             if task is not None:
                 task.cancel()
                 try:
@@ -199,6 +200,7 @@ class TransportFailover:
 
         self._monitor_task = None
         self._network_task = None
+        self._backoff_task = None
         log.info("Failover stopped")
 
     @property
@@ -313,8 +315,8 @@ class TransportFailover:
                 recoverable=False,
             ))
             log.error("All transports exhausted")
-            # Start backoff retry loop
-            asyncio.ensure_future(self._backoff_retry_loop())
+            # Start backoff retry loop — store task so stop() can cancel it
+            self._backoff_task = asyncio.ensure_future(self._backoff_retry_loop())
             return
 
         # Try to start stream on next transport

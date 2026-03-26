@@ -189,6 +189,9 @@ class VirtualCameraSink:
         self._last_frame: Optional[np.ndarray] = None
         self._last_frame_lock = threading.Lock()
 
+        # Cached placeholder frame — allocated once, reused to avoid 6MB/frame at 30fps
+        self._placeholder_frame: Optional[np.ndarray] = None
+
         # Consumer thread
         self._consumer_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -531,15 +534,18 @@ class VirtualCameraSink:
         """Send a dark gray placeholder frame.
 
         Used on startup and when no real frames have been received.
+        Reuses a cached frame to avoid 6MB allocation per call at 30fps.
         """
         if self._cam is None:
             return
 
-        placeholder = np.full(
-            (self.height, self.width, 3),
-            _PLACEHOLDER_COLOR,
-            dtype=np.uint8,
-        )
+        if self._placeholder_frame is None:
+            self._placeholder_frame = np.full(
+                (self.height, self.width, 3),
+                _PLACEHOLDER_COLOR,
+                dtype=np.uint8,
+            )
+        placeholder = self._placeholder_frame
 
         try:
             self._cam.send(placeholder)

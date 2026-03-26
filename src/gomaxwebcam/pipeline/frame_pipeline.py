@@ -482,14 +482,27 @@ class FramePipeline:
         """Clean up decoder and virtual camera resources.
 
         Stop order matters: decoder first (stop producing), then sink.
+        Also clears callbacks to break circular reference chains
+        (pipeline → manager → transport → listener → pipeline) that
+        prevent deterministic GC of decoder state and numpy buffers.
         """
         if self._decoder is not None:
             self._decoder.stop()
+            # Clear decoder callbacks to break reference cycle
+            self._decoder._on_frame = None
+            self._decoder._on_error = None
+            self._decoder._on_stopped = None
             self._decoder = None
 
         if self._vcam_sink is not None:
             self._vcam_sink.stop()
             self._vcam_sink = None
+
+        # Clear pipeline callbacks to break cycle with CameraManager
+        self.on_state_change = None
+        self.on_freeze = None
+        self.on_unfreeze = None
+        self._blank_frame = None
 
     # -- Frame delivery callback (called from decode thread) --
 
