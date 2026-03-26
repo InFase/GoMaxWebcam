@@ -466,6 +466,7 @@ def create_wizard_router() -> APIRouter:
                     wifi_ssid=body.wifi_ssid,
                     wifi_password=body.wifi_password,
                     ble_address=_serial,
+                    ble_mac=camera_address,  # Actual MAC for Windows scan fallback
                     on_status=_on_status,
                 )
 

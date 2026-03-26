@@ -175,6 +175,7 @@ class COHNOrchestrator:
         wifi_ssid: str,
         wifi_password: str,
         ble_address: str | None = None,
+        ble_mac: str | None = None,
         on_status: StatusCallback | None = None,
     ) -> Any:
         """Full orchestration: BLE provision → COHN connect.
@@ -205,6 +206,7 @@ class COHNOrchestrator:
                 wifi_ssid=wifi_ssid,
                 wifi_password=wifi_password,
                 target=ble_address,
+                ble_mac=ble_mac,
             )
 
             if credentials is None:
@@ -332,6 +334,7 @@ class COHNOrchestrator:
         wifi_ssid: str,
         wifi_password: str,
         target: str | None = None,
+        ble_mac: str | None = None,
     ) -> Any:
         """Run BLE scan + connect + COHN provisioning via open-gopro.
 
@@ -385,6 +388,7 @@ class COHNOrchestrator:
             on_progress=_on_progress,
             ble_timeout=int(self._ble_scan_timeout),
             provision_timeout=int(PROVISION_TIMEOUT_S),
+            ble_address=ble_mac,
         )
 
         if credentials is not None and credentials.provisioned:

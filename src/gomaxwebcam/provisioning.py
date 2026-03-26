@@ -191,6 +191,7 @@ class BLEProvisioningService:
         on_progress: ProgressCallback | None = None,
         ble_timeout: int = 15,
         provision_timeout: int = 60,
+        ble_address: str | None = None,
     ) -> COHNCredentials | None:
         """Run full BLE → COHN provisioning.
 
@@ -204,11 +205,14 @@ class BLEProvisioningService:
             on_progress: Callback for progress updates.
             ble_timeout: BLE connection timeout in seconds.
             provision_timeout: COHN provisioning timeout in seconds.
+            ble_address: BLE MAC address (e.g. "F7:23:0C:86:42:F5") for
+                Windows scan fallback when device name is missing.
 
         Returns:
             COHNCredentials on success, None on failure.
         """
         self._cancelled = False
+        self._ble_address = ble_address
         notify = on_progress or (lambda p: None)
 
         try:
@@ -466,13 +470,93 @@ class BLEProvisioningService:
             )
             target = None
 
-        return WirelessGoPro(
+        gopro = WirelessGoPro(
             target=target,
             cohn_db=self._cohn_db_path,
             interfaces={
                 WirelessGoPro.Interface.BLE,  # BLE only — prevents WiFi disconnect
             },
         )
+
+        # Workaround: On Windows, GoPro BLE advertisements often don't include
+        # the device name (shows as "" or "."), causing the SDK's scan_callback
+        # to never match on target regex. Monkey-patch the BLE controller's scan
+        # to also check the device address against a known BLE address.
+        if self._ble_address and ":" in self._ble_address:
+            self._patch_scan_for_address(gopro, self._ble_address)
+
+        return gopro
+
+    def _patch_scan_for_address(self, gopro: Any, ble_address: str) -> None:
+        """Monkey-patch the SDK's BLE scan to match by address when name is empty.
+
+        On Windows, GoPro BLE advertisements frequently arrive without the
+        device name. The SDK's scan_callback only checks token.match(name),
+        which fails when name is empty. This patch adds a fallback that
+        also matches by the known BLE address.
+        """
+        try:
+            controller = gopro._ble._controller  # BleakWrapperController
+            original_scan = controller.scan
+
+            async def patched_scan(token, timeout=5, service_uuids=None):
+                """Scan with address fallback for Windows name-missing issue."""
+                import re
+                from bleak import BleakScanner, BleakClient
+                from bleak.backends.device import BLEDevice as BleakDevice
+                from bleak.backends.scanner import AdvertisementData
+
+                stop_event = asyncio.Event()
+                devices = {}
+                target_addr = ble_address.upper()
+
+                log.info(
+                    "Patched scan: looking for %s (name) or %s (address)",
+                    token.pattern, target_addr,
+                )
+
+                def scan_callback(device: BleakDevice, adv_data: AdvertisementData):
+                    name = adv_data.local_name or device.name or ""
+                    addr = (device.address or "").upper()
+
+                    if name and name not in devices:
+                        devices[name] = device
+
+                    # Match by name (SDK default) OR by address (our fallback)
+                    if token.match(name) or addr == target_addr:
+                        if not stop_event.is_set():
+                            log.info("Matched device: %s (%s)", name or "(no name)", addr)
+                            devices[addr] = device
+                            stop_event.set()
+
+                uuids = [] if service_uuids is None else [str(u) for u in service_uuids]
+                async with BleakScanner(
+                    timeout=timeout,
+                    detection_callback=scan_callback,
+                    service_uuids=uuids if uuids else None,
+                ):
+                    try:
+                        await asyncio.wait_for(stop_event.wait(), timeout)
+                    except asyncio.TimeoutError:
+                        from open_gopro.domain.exceptions import FailedToFindDevice
+                        raise FailedToFindDevice
+
+                # Return the matched device
+                matched = [d for d in devices.values()
+                           if (d.address or "").upper() == target_addr]
+                if not matched:
+                    matched = [d for n, d in devices.items() if token.match(n)]
+                if not matched:
+                    from open_gopro.domain.exceptions import FailedToFindDevice
+                    raise FailedToFindDevice
+
+                log.info("Patched scan found %d device(s)", len(matched))
+                return matched[0]
+
+            controller.scan = patched_scan
+            log.debug("BLE scan patched for address-based matching: %s", ble_address)
+        except AttributeError:
+            log.warning("Could not patch BLE scan — SDK internals may have changed")
 
     # ------------------------------------------------------------------
     # Internal: WiFi connection
