@@ -28,6 +28,12 @@ logs/
 # Config (user-specific)
 config.json
 
+# COHN credentials database (contains camera secrets)
+cohn_db.json
+
+# Lock files
+uv.lock
+
 # Release artifacts
 *.zip
 dist_final/

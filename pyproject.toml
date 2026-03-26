@@ -40,6 +40,12 @@ dependencies = [
     "sse-starlette>=2.0.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/InFase/GoMaxWebcam"
+Repository = "https://github.com/InFase/GoMaxWebcam"
+"Bug Tracker" = "https://github.com/InFase/GoMaxWebcam/issues"
+Documentation = "https://github.com/InFase/GoMaxWebcam#readme"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",

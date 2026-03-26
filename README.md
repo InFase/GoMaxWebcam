@@ -1,24 +1,28 @@
-# GoProBridge
+# GoMaxWebcam
 
-Turn your GoPro into a high-quality USB webcam for Zoom, Teams, OBS, and NVIDIA Broadcast.
+**Turn your GoPro into a high-quality wireless or USB webcam.**
+
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![CI](https://github.com/InFase/GoMaxWebcam/actions/workflows/ci.yml/badge.svg)](https://github.com/InFase/GoMaxWebcam/actions)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)]()
 
 ---
 
 ## What It Does
 
-GoProBridge connects your GoPro over USB, enables its webcam mode, and streams the video feed into a virtual camera device that any application can use -- just like a regular webcam.
+GoMaxWebcam connects your GoPro camera to your computer and presents it as a standard virtual webcam that works with Zoom, Teams, OBS, NVIDIA Broadcast, and any other video application.
 
-Key behaviors:
-
-- **Auto-reconnect** — if the camera disconnects mid-call, GoProBridge detects it, holds a freeze-frame, and resumes streaming automatically when the camera comes back.
-- **Zero-latency pipeline** — the stream goes directly from the camera to the virtual device with no intermediate recording or buffering overhead.
-- **Fully offline** — no cloud, no telemetry, no account required. Everything runs locally.
+- **USB + WiFi (COHN) dual transport** with automatic failover -- if the USB cable is unplugged, GoMaxWebcam switches to WiFi without dropping your call.
+- **Freeze-frame during transitions** -- the last good frame is held while transports switch, so your video never goes black.
+- **Browser-based dashboard** -- control everything from a GoPro-inspired dark-theme UI. No desktop GUI framework needed.
+- **Fully local** -- no cloud, no telemetry, no account. Everything runs on your machine.
 
 ---
 
 ## Supported Cameras
 
-GoProBridge works with any GoPro that supports the Open GoPro USB webcam protocol:
+Any GoPro with the Open GoPro webcam protocol:
 
 - GoPro Hero 13 Black
 - GoPro Hero 12 Black
@@ -26,102 +30,302 @@ GoProBridge works with any GoPro that supports the Open GoPro USB webcam protoco
 - GoPro Hero 10 Black
 - GoPro Hero 9 Black
 
-Older models (Hero 8 and earlier) do not support USB webcam mode via the Open GoPro API.
-
-## Requirements
-
-- Windows 10 or Windows 11 (64-bit)
-- A supported GoPro camera (see above)
-- USB-C data cable (the cable that came with your GoPro works)
+Older models (Hero 8 and earlier) do not support the Open GoPro USB webcam API.
 
 ---
 
 ## Quick Start
 
-1. Download the latest release zip from the [Releases](https://github.com/InFase/GoMaxWebcam/releases) page.
-2. Extract the zip to any folder.
-3. Run `GoProBridge.exe`.
-4. On first run, a setup wizard will check for and install any missing dependencies (ffmpeg, Unity Capture virtual camera driver).
-5. Connect your GoPro to your PC via USB-C. The dashboard will show the camera as active.
-6. Open Zoom, Teams, OBS, or NVIDIA Broadcast and select "GoProBridge" or "Unity Video Capture" as your camera source.
+### Prerequisites
+
+- **Python 3.12 or later**
+- **GoPro Hero 12 or 13** (recommended; older models work over USB only)
+- **Virtual camera driver:**
+  - Windows: [Unity Capture](https://github.com/schellingb/UnityCapture) (bundled in release builds)
+  - macOS: OBS Virtual Camera
+  - Linux: v4l2loopback
+- **USB-C data cable** (the cable that came with your GoPro works)
+
+### Install from PyPI
+
+```bash
+pip install gomaxwebcam
+gomaxwebcam
+```
+
+### Install from Source
+
+```bash
+git clone https://github.com/InFase/GoMaxWebcam.git
+cd GoMaxWebcam
+pip install -e .
+python -m gomaxwebcam
+```
+
+GoMaxWebcam auto-detects your GoPro over USB, starts the webcam stream, and opens the dashboard in your default browser. Select **Unity Video Capture** (Windows) or the equivalent virtual camera in your video app.
+
+### CLI Options
+
+| Flag | Description |
+|------|-------------|
+| `--headless` | Run without system tray (dashboard only, binds to `0.0.0.0`) |
+| `--debug` | Enable verbose debug logging |
 
 ---
 
 ## Features
 
-- **Automatic camera detection** — plug in the GoPro and it is found without any manual configuration.
-- **1080p at 30 fps by default**, with 720p also available. Resolution options depend on your GoPro model and firmware.
-- **Freeze-frame recovery** — the last good frame is held during brief disconnects so your video feed does not go black mid-call.
-- **Broad app compatibility** — tested with Zoom, Microsoft Teams, OBS Studio, and NVIDIA Broadcast.
-- **Virtual camera via Unity Capture** — a low-overhead DirectShow virtual device that works with virtually any Windows application.
-- **Configurable resolution, frame rate, and stream parameters** via a JSON config file.
-- **Dark dashboard UI** — a lightweight system-tray-accessible window showing camera status, active port, and stream health.
-- **No internet required** — GoProBridge never phones home. All processing is local.
+### Dual Transport with Automatic Failover
+
+GoMaxWebcam tries transports in priority order (configurable):
+
+1. **USB** -- lowest latency, most reliable when physically connected.
+2. **COHN (Camera on the Home Network)** -- WiFi streaming via the camera's built-in HTTPS server. Requires one-time BLE provisioning.
+3. **WiFi AP** -- direct WiFi connection to the camera's own access point.
+
+If the active transport drops, GoMaxWebcam automatically fails over to the next available transport. When a higher-priority transport reappears (e.g., USB cable plugged back in), it fails back automatically.
+
+### Freeze-Frame
+
+During transport transitions, the pipeline holds the last decoded frame and continues sending it to the virtual camera. Your video call sees a brief freeze instead of a black screen.
+
+### Browser Dashboard
+
+The dashboard opens automatically at `http://127.0.0.1:<port>/?token=<token>` and has four pages:
+
+| Page | What It Shows |
+|------|---------------|
+| **Home** | Live status, camera info, stream controls (pause, visibility, reconnect), live preview |
+| **Settings** | Resolution, FOV, transport priority, auto-start, browser-on-start |
+| **Diagnostics** | Real-time event log, transport state, frame pipeline health |
+| **Setup** | COHN WiFi provisioning wizard (BLE-based) |
+
+The dashboard uses a GoPro-inspired dark theme with `#00BCE4` accent color. It is a single-page Alpine.js application served by FastAPI with SSE for real-time updates.
+
+### System Tray
+
+On desktop (non-headless) mode, a system tray icon provides quick access to:
+
+- Open the dashboard
+- View connection status
+- Quit the application
+
+### Single Instance
+
+Only one copy of GoMaxWebcam runs at a time. Launching a second instance opens the existing dashboard URL and exits.
+
+---
+
+## COHN WiFi Setup
+
+COHN (Camera on the Home Network) lets your GoPro stream over your home WiFi without a USB cable. Setup requires a one-time BLE (Bluetooth Low Energy) provisioning step:
+
+1. Open the GoMaxWebcam dashboard and go to the **Setup** page.
+2. Follow the wizard: it scans for your GoPro via BLE, pairs with it, and provisions COHN credentials.
+3. Credentials are stored securely in your OS keyring (Windows Credential Manager / macOS Keychain / Linux Secret Service).
+4. Once provisioned, COHN is available as a fallback transport automatically.
+
+---
+
+## Keyboard Shortcuts
+
+Press **?** in the dashboard to see the shortcuts overlay.
+
+### Navigation
+
+| Key | Action |
+|-----|--------|
+| `H` | Go to Home page |
+| `S` | Go to Settings page |
+| `D` | Go to Diagnostics page |
+| `U` | Go to Setup page |
+
+### Camera Actions
+
+| Key | Action |
+|-----|--------|
+| `L` | Toggle live preview |
+| `P` | Pause / resume stream |
+| `V` | Toggle camera visibility |
+| `R` | Reconnect to camera |
+
+### UI
+
+| Key | Action |
+|-----|--------|
+| `?` | Toggle keyboard shortcuts overlay |
+| `Escape` | Close overlay / preview |
 
 ---
 
 ## Configuration
 
-Settings are stored in:
+Settings are stored in a TOML file at the platform config directory:
 
+| OS | Path |
+|----|------|
+| Windows | `%APPDATA%\GoMaxWebcam-v2\config.toml` |
+| macOS | `~/Library/Application Support/GoMaxWebcam-v2/config.toml` |
+| Linux | `~/.config/GoMaxWebcam-v2/config.toml` |
+
+The file is created automatically on first run with safe defaults. Delete it to reset all settings.
+
+### Key Settings
+
+```toml
+[transport]
+priority = ["usb", "cohn", "wifi_ap"]   # Connection order
+ble_wake_mode = "always_on"              # "always_on" or "battery_saver"
+
+[video]
+resolution = "1080p"                     # "480p", "720p", "1080p"
+fov = "wide"                             # "wide", "linear", "narrow", "superview"
+
+[dashboard]
+auto_start = false                       # Launch on login
+open_browser_on_start = true             # Open dashboard automatically
+
+[advanced]
+udp_port = 8554                          # GoPro stream port
+frame_timeout_seconds = 5                # Seconds before freeze-frame
+keepalive_interval = 2.5                 # Keep-alive ping interval
 ```
-%APPDATA%\GoProBridge\config.json
-```
 
-You can edit this file directly. Changes take effect the next time GoProBridge starts. The file is created automatically on first run with sensible defaults.
+COHN credentials (passwords, CA certificates) are stored in the OS keyring, not in the config file.
 
-Common settings include resolution, frame rate, the virtual camera device index, and reconnect retry behavior. See the comments inside the generated config file for descriptions of each option.
+See the full annotated default config in [`src/gomaxwebcam/config.py`](src/gomaxwebcam/config.py).
 
 ---
 
-## Building from Source
+## Building Standalone Executables
 
-**Prerequisites:** Python 3.11 or later, Git
+GoMaxWebcam includes a cross-platform PyInstaller spec file.
+
+```bash
+pip install pyinstaller
+pyinstaller gomaxwebcam.spec --noconfirm
+```
+
+Output goes to `dist/GoMaxWebcam/`. The spec handles:
+
+- Dashboard static assets (HTML/CSS/JS)
+- pyvirtualcam native backends per platform
+- BLE (bleak) data files
+- Unity Capture DLLs on Windows (if present in `UnityCapture/`)
+- macOS `.app` bundle with Bluetooth and network usage descriptions
+
+---
+
+## Development
+
+### Setup
 
 ```bash
 git clone https://github.com/InFase/GoMaxWebcam.git
 cd GoMaxWebcam
-pip install -r requirements.txt
-python src/main.py
+pip install -e ".[dev]"
 ```
 
-**To build a standalone executable:**
+### Run Tests
+
+Tests run inside a Windows Job Object with a 2 GB RAM cap to prevent runaway allocations from crashing the machine:
 
 ```bash
-pyinstaller GoProBridge.spec
+python run_tests.py                         # Default: 2 GB limit
+python run_tests.py --limit-mb 1500         # Custom limit
+python run_tests.py -- -k test_frame        # Pass args to pytest
+python run_tests.py --force-run             # Run without GoPro connected
 ```
 
-The output will be in `dist/GoProBridge/`. The spec file handles all hidden imports and data bundling.
+On non-Windows platforms, pytest runs normally without the Job Object wrapper.
+
+Tests are in `tests/v2/` and use `pytest-asyncio`. Hardware-dependent tests are marked `@pytest.mark.hardware` and skipped when no GoPro is connected.
+
+### Lint
+
+```bash
+ruff check src/gomaxwebcam/
+```
+
+Ruff is configured for Python 3.12, line length 100, with `E`, `F`, `I`, `N`, `W` rules enabled.
+
+### CI
+
+GitHub Actions runs on every push to `v2-rewrite` and `main`:
+
+- Lint with ruff
+- Tests on Python 3.12 and 3.13 across Ubuntu, macOS, and Windows
+- Tagged releases build standalone executables for all three platforms
 
 ---
 
-## Troubleshooting
+## Architecture
 
-**GoPro not found**
-Confirm the USB-C cable supports data transfer (not just charging). On the GoPro, go to Connections > USB Connection and set it to "Webcam" or "GoPro Connect". Some cables are charge-only.
+GoMaxWebcam v2 is built on an async-first architecture with clear separation of concerns:
 
-**Virtual camera not available in Zoom / Teams**
-The Unity Capture driver may not be installed or may need to be re-registered. Run GoProBridge as Administrator once to allow the first-run wizard to install the driver. If the problem persists, manually run `register_vcam.bat` found in the installation folder.
+```
+                    +-----------+
+                    | Dashboard |  (FastAPI + Alpine.js SPA)
+                    | SSE push  |
+                    +-----+-----+
+                          |
+                    +-----+-----+
+                    |Orchestrator|  Lifecycle & coordination
+                    +-----+-----+
+                          |
+              +-----------+-----------+
+              |                       |
+     +--------+--------+    +--------+--------+
+     |TransportManager  |    |  FramePipeline  |
+     | USB / COHN /     |    |  PyAV decode    |
+     | WiFi AP failover |    |  freeze-frame   |
+     +--------+---------+    |  BGR24 output   |
+              |              +--------+--------+
+              |                       |
+     +--------+---------+   +--------+--------+
+     |   EventBus       |   | VirtualCamera   |
+     | async pub/sub    |   | pyvirtualcam    |
+     +------------------+   +-----------------+
+```
 
-**ffmpeg not found**
-GoProBridge expects ffmpeg to be either bundled in the installation directory or available on your system PATH. The first-run wizard normally handles this. If you built from source, download a Windows ffmpeg build from [ffmpeg.org](https://ffmpeg.org/download.html) and place `ffmpeg.exe` in the project root or add it to PATH.
+**Key modules:**
 
-**Windows Camera app does not show the virtual camera**
-The built-in Windows Camera app on Windows 11 uses the Media Foundation API, which cannot see DirectShow-based virtual cameras like Unity Capture or OBS Virtual Camera. This is a platform limitation that affects all DirectShow virtual cameras, not just GoProBridge. Use any other app instead -- Zoom, Teams, OBS, NVIDIA Broadcast, Google Meet, Discord, and most other video apps use DirectShow and will detect the camera normally.
-
-**Windows Firewall prompt**
-GoProBridge communicates with the GoPro over a local USB network interface (NCM/RNDIS). If Windows Firewall asks for permission, allow access on Private networks. No external network access is made.
+| Module | Purpose |
+|--------|---------|
+| `__main__` | CLI, single-instance lock, server bootstrap |
+| `orchestrator` | App lifecycle, dashboard creation, graceful shutdown |
+| `transport_manager` | Priority-based transport selection, failover, fail-back |
+| `transport/usb` | USB webcam via Open GoPro SDK |
+| `transport/cohn` | COHN (WiFi HTTPS) webcam transport |
+| `transport/wifi_ap` | Direct WiFi AP transport |
+| `pipeline/frame_pipeline` | Frame decoding (PyAV primary, ffmpeg fallback), freeze-frame |
+| `pipeline/virtual_camera_sink` | pyvirtualcam output (1080p 30fps BGR24) |
+| `events` | Async EventBus for decoupled component communication |
+| `config` | TOML config with validation, keyring credential storage |
+| `dashboard/app` | FastAPI routes, SSE streaming, static file serving |
+| `ble/` | BLE scanner, GATT client, COHN provisioning |
+| `tray` | pystray system tray icon |
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT -- see [LICENSE](LICENSE).
+
+---
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on setting up the development environment, running tests, and submitting pull requests.
 
 ---
 
 ## Acknowledgments
 
-- [ffmpeg](https://ffmpeg.org/) — video capture and stream processing.
-- [Unity Capture](https://github.com/schellingb/UnityCapture) — virtual DirectShow camera device.
-- [pyvirtualcam](https://github.com/letmaik/pyvirtualcam) — Python interface for virtual camera output.
+- [Open GoPro](https://gopro.github.io/OpenGoPro/) -- GoPro's open API for camera control
+- [PyAV](https://github.com/PyAV-Org/PyAV) -- Python bindings for ffmpeg libraries
+- [pyvirtualcam](https://github.com/letmaik/pyvirtualcam) -- virtual camera output
+- [Unity Capture](https://github.com/schellingb/UnityCapture) -- DirectShow virtual camera driver (Windows)
+- [FastAPI](https://fastapi.tiangolo.com/) -- async web framework for the dashboard
+- [Alpine.js](https://alpinejs.dev/) -- lightweight JS framework for the dashboard SPA
+- [bleak](https://github.com/hbldh/bleak) -- cross-platform BLE library
