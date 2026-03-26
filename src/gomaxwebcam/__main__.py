@@ -384,6 +384,22 @@ def main() -> None:
     # SIGTERM may not be available on Windows in all contexts
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, _signal_handler)
+    # Windows: SIGBREAK is sent when the console window is closed (X button)
+    # or when the user logs off. Without this, the process hangs forever.
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, _signal_handler)
+
+    # Fallback: atexit handler ensures cleanup even if signals are missed
+    import atexit
+
+    def _atexit_cleanup() -> None:
+        if not shutdown_event.is_set():
+            log.info("atexit cleanup — forcing shutdown")
+            shutdown_event.set()
+            if loop.is_running():
+                loop.call_soon_threadsafe(loop.stop)
+
+    atexit.register(_atexit_cleanup)
 
     # -- Tray icon on a daemon thread (desktop mode) --
     if not headless:
@@ -414,7 +430,10 @@ def main() -> None:
             log.warning("pystray not available, running without tray")
 
     # -- Main thread: block until shutdown --
-    shutdown_event.wait()
+    # Use a polling wait so the main thread can respond to Windows console
+    # close events (SIGBREAK) which are only delivered to the main thread.
+    while not shutdown_event.wait(timeout=1.0):
+        pass
 
     # Wait for the loop thread to finish (give graceful shutdown time)
     loop_thread.join(timeout=10.0)
