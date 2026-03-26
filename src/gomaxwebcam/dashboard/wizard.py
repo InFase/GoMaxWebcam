@@ -449,10 +449,23 @@ def create_wizard_router() -> APIRouter:
                         cohn_username=_cohn_username,
                     ))
 
+                # Extract serial suffix from device name for SDK target.
+                # The SDK matches target against device NAMES (e.g. "GoPro 7212"),
+                # not BLE addresses. Pass the serial suffix ("7212") or None.
+                import re as _re
+                _serial = None
+                if camera_name:
+                    _m = _re.search(r"(\d{4})$", camera_name.strip())
+                    if _m:
+                        _serial = _m.group(1)
+                if not _serial:
+                    # Fallback: pass None to scan for any GoPro
+                    log.info("No serial extracted from name '%s', scanning for any GoPro", camera_name)
+
                 transport = await orchestrator.provision_and_connect(
                     wifi_ssid=body.wifi_ssid,
                     wifi_password=body.wifi_password,
-                    ble_address=camera_address,
+                    ble_address=_serial,
                     on_status=_on_status,
                 )
 

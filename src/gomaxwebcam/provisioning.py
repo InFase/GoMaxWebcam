@@ -440,19 +440,37 @@ class BLEProvisioningService:
         """Create a WirelessGoPro instance.
 
         Uses the factory override if set (for testing), otherwise
-        creates a real WirelessGoPro with BLE + COHN interfaces.
+        creates a real WirelessGoPro with BLE-only interface for provisioning.
+
+        The target should be the serial suffix (last 4 digits from the
+        device name, e.g. "7212" from "GoPro 7212"), NOT a BLE MAC address.
+        The SDK uses target as a regex matched against device NAMES.
+
+        We use BLE-only (not COHN) to prevent the SDK from terminating
+        the PC's WiFi connection during provisioning.
         """
         if self._gopro_factory is not None:
             return self._gopro_factory(target)
 
         from open_gopro import WirelessGoPro
 
+        # Convert BLE address to serial suffix if needed.
+        # BLE addresses look like "F7:23:0C:86:42:F5" (contains colons).
+        # Serial suffixes look like "7212" (4 digits, no colons).
+        if target and ":" in target:
+            log.warning(
+                "Target '%s' looks like a BLE address, not a serial suffix. "
+                "The SDK matches target against device names. "
+                "Passing None to scan for any GoPro.",
+                target,
+            )
+            target = None
+
         return WirelessGoPro(
             target=target,
             cohn_db=self._cohn_db_path,
             interfaces={
-                WirelessGoPro.Interface.BLE,
-                WirelessGoPro.Interface.COHN,
+                WirelessGoPro.Interface.BLE,  # BLE only — prevents WiFi disconnect
             },
         )
 
