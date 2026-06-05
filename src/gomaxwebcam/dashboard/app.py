@@ -873,7 +873,7 @@ def create_app(
             from gomaxwebcam.ble.gatt_client import GoProBLEClient
 
             scanner = BLEScanner(scan_timeout=8.0)
-            gopros = await scanner.scan_once(timeout=8.0)
+            gopros = await scanner.scan_once(timeout=5.0)
             named = [g for g in gopros if "GoPro" in g.name]
             if not named:
                 return JSONResponse(content={"ok": False, "error": "No GoPro found via BLE. Camera may be fully powered off."})
@@ -911,8 +911,8 @@ def create_app(
             from gomaxwebcam.ble.cohn import COHNProvisioner
 
             # Step 1: BLE scan
-            scanner = BLEScanner(scan_timeout=10.0)
-            gopros = await scanner.scan_once(timeout=10.0)
+            scanner = BLEScanner(scan_timeout=5.0)
+            gopros = await scanner.scan_once(timeout=5.0)
             named = [g for g in gopros if "GoPro" in g.name]
             if not named:
                 return JSONResponse(content={"ok": False, "error": "No GoPro found via Bluetooth. Make sure it's powered on."})

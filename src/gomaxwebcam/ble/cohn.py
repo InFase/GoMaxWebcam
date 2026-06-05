@@ -651,13 +651,19 @@ class COHNProvisioner:
     def _decode_cohn_status(self, response: bytes) -> None:
         """Decode COHN status response and update credentials.
 
-        Response format: [action_id(0xEF), protobuf_fields...]
-        The first byte is the response action ID, then protobuf fields follow.
+        Response format varies:
+          - Short messages: [action_id, protobuf_fields...]
+          - Extended messages: [feature_id, action_id, protobuf_fields...]
+        We detect by checking if the first byte is a known feature ID.
         """
         if len(response) < 2:
             return
 
-        offset = 1  # Skip action_id byte only
+        # Skip feature_id + action_id header
+        if response[0] in (0xF1, 0xF5, 0x02):
+            offset = 2  # [feature_id, action_id, ...]
+        else:
+            offset = 1  # [action_id, ...]
         # NotifyCOHNStatus protobuf fields:
         #   1: status (EnumCOHNStatus: 0=UNPROVISIONED, 1=PROVISIONED)
         #   2: state (EnumCOHNNetworkState)

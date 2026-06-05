@@ -69,6 +69,7 @@ class GoProBLEClient:
         # Response accumulators keyed by characteristic UUID
         self._response_events: dict[str, asyncio.Event] = {}
         self._response_buffers: dict[str, bytearray] = {}
+        self._response_expected_len: dict[str, int] = {}
         self._notification_handlers: dict[str, Callable] = {}
 
     # ------------------------------------------------------------------
@@ -310,54 +311,54 @@ class GoProBLEClient:
                 log.warning("Could not subscribe to %s: %s", uuid[-8:], e)
 
     def _on_notification(self, uuid: str, data: bytearray) -> None:
-        """Handle an incoming BLE notification.
+        """Handle an incoming BLE notification with proper fragmentation reassembly.
 
-        GoPro uses a simple TLV-like fragmentation protocol:
-          - First byte: continuation header
-            - Bit 7 (0x80): 0 = start packet, 1 = continuation packet
-            - Bits 0-4: message length (for start packets)
-          - Subsequent bytes: payload
+        GoPro BLE fragmentation protocol:
+          Start packet:  header byte encodes total message length
+            - Bit 5 (0x20) clear: lower 5 bits = total length, payload at byte 1
+            - Bit 5 (0x20) set:   bytes 1-2 = 16-bit big-endian length, payload at byte 3
+          Continuation:  bit 7 (0x80) set, payload at byte 1
 
-        For start packets, byte 1-2 are the total message length.
-        We reassemble fragments and signal when the message is complete.
+        We track expected length and signal completion only when all bytes arrive.
         """
-        # Call custom handler if registered
         if uuid in self._notification_handlers:
             try:
                 self._notification_handlers[uuid](bytes(data))
             except Exception as e:
                 log.warning("Notification handler error for %s: %s", uuid[-8:], e)
 
-        # Reassemble fragmented response
         if uuid not in self._response_buffers:
             self._response_buffers[uuid] = bytearray()
             self._response_events[uuid] = asyncio.Event()
+            self._response_expected_len[uuid] = 0
 
         header = data[0] if data else 0
         is_continuation = bool(header & 0x80)
 
         if not is_continuation:
-            # Start of new message — reset buffer
             self._response_buffers[uuid] = bytearray()
-            # Skip the header byte(s) — payload starts after length info
-            if header & 0x20:  # Extended 16-bit length
-                # Bytes 1-2 are the total length (big-endian)
-                if len(data) > 3:
-                    self._response_buffers[uuid].extend(data[3:])
+            if header & 0x20:
+                # Extended length: high bits in header[0:4], low byte in data[1]
+                expected = ((header & 0x1F) << 8) | (data[1] & 0xFF) if len(data) > 1 else 0
+                self._response_expected_len[uuid] = expected
+                if len(data) > 2:
+                    self._response_buffers[uuid].extend(data[2:])
             else:
-                # Byte 0 lower bits contain length, payload starts at byte 1
+                expected = header & 0x1F
+                self._response_expected_len[uuid] = expected
                 if len(data) > 1:
                     self._response_buffers[uuid].extend(data[1:])
         else:
-            # Continuation packet — append payload (skip header byte)
             if len(data) > 1:
                 self._response_buffers[uuid].extend(data[1:])
 
-        # Signal that we have data (the waiter checks completeness)
-        # For simplicity, signal on every packet — the waiter uses a timeout
-        event = self._response_events.get(uuid)
-        if event is not None:
-            event.set()
+        expected = self._response_expected_len.get(uuid, 0)
+        received = len(self._response_buffers.get(uuid, b""))
+
+        if received >= expected and expected > 0:
+            event = self._response_events.get(uuid)
+            if event is not None:
+                event.set()
 
     async def _write_and_wait(
         self,
@@ -390,7 +391,7 @@ class GoProBLEClient:
                     timeout=GATT_TIMEOUT_S,
                 )
 
-            # Wait for first response notification
+            # Wait for complete response (signalled when all bytes received)
             try:
                 await asyncio.wait_for(event.wait(), timeout=timeout)
             except asyncio.TimeoutError:
@@ -400,9 +401,6 @@ class GoProBLEClient:
                 )
                 buf = self._response_buffers.get(response_uuid, bytearray())
                 return bytes(buf) if buf else None
-
-            # Wait briefly for continuation packets to arrive
-            await asyncio.sleep(0.3)
 
             # Return accumulated response
             buf = self._response_buffers.get(response_uuid, bytearray())

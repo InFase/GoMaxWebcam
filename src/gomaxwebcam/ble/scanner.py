@@ -23,6 +23,7 @@ from typing import Callable, Optional
 from gomaxwebcam.ble.uuids import (
     GOPRO_SERVICE_UUID,
     GOPRO_NAME_PREFIXES,
+    GOPRO_MANUFACTURER_ID,
 )
 
 log = logging.getLogger("gomaxwebcam.ble.scanner")
@@ -82,35 +83,42 @@ class BLEScanner:
         try:
             from bleak import BleakScanner
 
-            scanner = BleakScanner(
-                service_uuids=[GOPRO_SERVICE_UUID],
-                adapter=self._adapter,
-            )
+            gopros = []
+            found_event = asyncio.Event()
 
-            adv_map = {}
+            gopro_addrs: dict[str, tuple] = {}  # addr → (device, adv_data)
 
             def _detection_cb(device, adv_data):
-                adv_map[device.address] = (device, adv_data)
+                if self._is_gopro_adv(device, adv_data):
+                    addr = device.address
+                    name = adv_data.local_name or device.name or ""
+                    # Update stored data — later packets may have the name
+                    if addr not in gopro_addrs or (name and "GoPro" in name):
+                        gopro_addrs[addr] = (device, adv_data)
+                    if not found_event.is_set():
+                        found_event.set()
 
-            scanner2 = BleakScanner(
+            scanner = BleakScanner(
                 detection_callback=_detection_cb,
                 service_uuids=[GOPRO_SERVICE_UUID],
                 adapter=self._adapter,
             )
-            await scanner2.start()
-            await asyncio.sleep(timeout)
-            await scanner2.stop()
+            await scanner.start()
+            try:
+                await asyncio.wait_for(found_event.wait(), timeout=timeout)
+                # Brief extra window: collect name packets and additional GoPros
+                await asyncio.sleep(1.0)
+            except asyncio.TimeoutError:
+                pass
+            await scanner.stop()
 
-            gopros = []
-
-            for addr, (device, adv_data) in adv_map.items():
-                if self._is_gopro_adv(device, adv_data):
-                    gopro = self._make_discovered(device, adv_data)
-                    gopros.append(gopro)
-                    log.info(
-                        "Found GoPro: %s (%s, RSSI=%ddBm)",
-                        gopro.name, gopro.address, gopro.rssi,
-                    )
+            for addr, (device, adv_data) in gopro_addrs.items():
+                gopro = self._make_discovered(device, adv_data)
+                gopros.append(gopro)
+                log.info(
+                    "Found GoPro: %s (%s, RSSI=%ddBm)",
+                    gopro.name, gopro.address, gopro.rssi,
+                )
 
             log.info("BLE scan complete: %d GoPro(s) found", len(gopros))
             return gopros
@@ -211,12 +219,13 @@ class BLEScanner:
     def _is_gopro_adv(device, adv_data) -> bool:
         """Check if a BLE device is a GoPro using AdvertisementData.
 
-        Matches on:
-          1. Device name starts with known GoPro prefix, OR
+        Matches on (any of):
+          1. Device name starts with known GoPro prefix ("GoPro ", "GP-")
           2. AdvertisementData.service_uuids contains GOPRO_SERVICE_UUID
+          3. Manufacturer data contains GoPro manufacturer ID (0x00D4)
 
-        On Windows, the name is frequently missing from GoPro BLE
-        advertisements, so the service UUID check is essential.
+        Works across Hero 9/10/11/12/13 — all use the same BLE service UUID.
+        On Windows, the name is frequently missing, so checks 2/3 are essential.
         """
         name = adv_data.local_name or device.name or ""
         if any(name.startswith(prefix) for prefix in GOPRO_NAME_PREFIXES):
@@ -224,6 +233,10 @@ class BLEScanner:
 
         service_uuids = getattr(adv_data, "service_uuids", []) or []
         if GOPRO_SERVICE_UUID in service_uuids:
+            return True
+
+        manufacturer_data = getattr(adv_data, "manufacturer_data", {}) or {}
+        if GOPRO_MANUFACTURER_ID in manufacturer_data:
             return True
 
         return False
