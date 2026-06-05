@@ -706,6 +706,362 @@ def create_app(
 
         return JSONResponse(content={"ok": True, "hidden": want_hidden})
 
+    # -- Camera control API (open-gopro SDK passthrough) --
+
+    from gomaxwebcam.camera_api import CameraAPI, CameraNotConnected
+
+    def _get_gopro_handle():
+        orch = getattr(app.state, "orchestrator", None)
+        if not orch:
+            return None
+        tm = getattr(orch, "transport_manager", None)
+        if not tm:
+            return None
+        active = tm.active_transport
+        if not active:
+            return None
+        return active.gopro_handle
+
+    # Load COHN credentials for direct HTTPS access (bypasses SDK transport)
+    _cohn_ip = ""
+    _cohn_user = ""
+    _cohn_password = ""
+    try:
+        from gomaxwebcam.transport.cohn_persistence import CohnCredentialStore
+        _store = CohnCredentialStore()
+        # Try known serials, then scan the db
+        for _serial in ["7212", "0067212"]:
+            _creds = _store.load_credentials(_serial)
+            if _creds and _creds.password:
+                _cohn_ip = _creds.ip_address
+                _cohn_user = _creds.username
+                _cohn_password = _creds.password
+                log.info("CameraAPI loaded COHN credentials for serial %s: %s@%s", _serial, _cohn_user, _cohn_ip)
+                break
+    except Exception as e:
+        log.debug("COHN credential load failed: %s", e)
+
+    app.state.camera_api = CameraAPI(
+        get_gopro=_get_gopro_handle,
+        cohn_ip=_cohn_ip,
+        cohn_user=_cohn_user,
+        cohn_password=_cohn_password,
+    )
+
+    async def _camera_call(request: Request, method: str, **kwargs) -> JSONResponse:
+        api: CameraAPI = request.app.state.camera_api
+        try:
+            result = await getattr(api, method)(**kwargs)
+            return JSONResponse(content=result)
+        except CameraNotConnected:
+            return JSONResponse(status_code=503, content={"ok": False, "error": "Camera not connected"})
+        except Exception as e:
+            log.error("Camera API error (%s): %s", method, e)
+            return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+
+    @app.post("/api/camera/shutter/start")
+    async def start_recording(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
+        return await _camera_call(request, "start_recording")
+
+    @app.post("/api/camera/shutter/stop")
+    async def stop_recording(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
+        return await _camera_call(request, "stop_recording")
+
+    @app.get("/api/camera/presets")
+    async def get_presets(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
+        return await _camera_call(request, "get_presets")
+
+    @app.post("/api/camera/preset")
+    async def load_preset(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
+        body = await request.json()
+        return await _camera_call(request, "load_preset", preset_id=body.get("id", 0))
+
+    @app.post("/api/camera/preset-group")
+    async def load_preset_group(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
+        body = await request.json()
+        return await _camera_call(request, "load_preset_group", group_id=body.get("id", 0))
+
+    @app.get("/api/camera/state")
+    async def camera_state(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
+        return await _camera_call(request, "get_state")
+
+    @app.get("/api/camera/info")
+    async def camera_info(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
+        return await _camera_call(request, "get_info")
+
+    @app.get("/api/media/list")
+    async def media_list(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
+        return await _camera_call(request, "get_media_list")
+
+    @app.get("/api/media/info")
+    async def media_info(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
+        path = request.query_params.get("path", "")
+        if not path:
+            return JSONResponse(status_code=400, content={"error": "path required"})
+        return await _camera_call(request, "get_media_info", path=path)
+
+    @app.delete("/api/media/file")
+    async def delete_media(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
+        body = await request.json()
+        path = body.get("path", "")
+        if not path:
+            return JSONResponse(status_code=400, content={"error": "path required"})
+        return await _camera_call(request, "delete_file", path=path)
+
+    @app.get("/api/media/thumbnail")
+    async def media_thumbnail(request: Request, _auth: None = Depends(verify_token)):
+        """Proxy thumbnail from camera to avoid CORS issues."""
+        import httpx
+        path = request.query_params.get("path", "")
+        if not path:
+            return JSONResponse(status_code=400, content={"error": "path required"})
+        api: CameraAPI = request.app.state.camera_api
+        try:
+            url = api.get_thumbnail_url(path)
+            auth = api._auth()
+            async with httpx.AsyncClient(verify=False, timeout=10.0, auth=auth) as client:
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    from fastapi.responses import Response
+                    return Response(content=resp.content, media_type="image/jpeg")
+                return JSONResponse(status_code=resp.status_code, content={"error": "Thumbnail not found"})
+        except CameraNotConnected:
+            return JSONResponse(status_code=503, content={"error": "Camera not connected"})
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+    @app.get("/api/media/download")
+    async def download_media(request: Request, _auth: None = Depends(verify_token)):
+        """Proxy media file download from camera."""
+        import httpx
+        path = request.query_params.get("path", "")
+        if not path:
+            return JSONResponse(status_code=400, content={"error": "path required"})
+        api: CameraAPI = request.app.state.camera_api
+        try:
+            url = api.get_download_url(path)
+            auth = api._auth()
+            async with httpx.AsyncClient(verify=False, timeout=300.0, auth=auth) as client:
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    filename = path.split("/")[-1] if "/" in path else path
+                    from fastapi.responses import Response
+                    return Response(
+                        content=resp.content,
+                        media_type="application/octet-stream",
+                        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+                    )
+                return JSONResponse(status_code=resp.status_code, content={"error": "File not found"})
+        except CameraNotConnected:
+            return JSONResponse(status_code=503, content={"error": "Camera not connected"})
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+    @app.post("/api/camera/reboot")
+    async def reboot_camera(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
+        return await _camera_call(request, "reboot")
+
+    @app.post("/api/camera/sleep")
+    async def sleep_camera(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
+        return await _camera_call(request, "sleep")
+
+    @app.post("/api/ble/wake")
+    async def ble_wake(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
+        """Wake camera from sleep via BLE connection."""
+        try:
+            from gomaxwebcam.ble.scanner import BLEScanner
+            from gomaxwebcam.ble.gatt_client import GoProBLEClient
+
+            scanner = BLEScanner(scan_timeout=8.0)
+            gopros = await scanner.scan_once(timeout=8.0)
+            named = [g for g in gopros if "GoPro" in g.name]
+            if not named:
+                return JSONResponse(content={"ok": False, "error": "No GoPro found via BLE. Camera may be fully powered off."})
+
+            client = GoProBLEClient(address=named[0].address)
+            if not await client.connect(timeout=15.0):
+                return JSONResponse(content={"ok": False, "error": "BLE connection failed"})
+
+            # Connection itself wakes the camera — wait a moment
+            import asyncio
+            await asyncio.sleep(2)
+            await client.disconnect()
+
+            return JSONResponse(content={"ok": True, "camera_name": named[0].name})
+        except Exception as e:
+            return JSONResponse(content={"ok": False, "error": str(e)})
+
+    @app.post("/api/camera/zoom")
+    async def set_zoom(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
+        body = await request.json()
+        percent = int(body.get("percent", 0))
+        if not 0 <= percent <= 100:
+            return JSONResponse(status_code=400, content={"error": "percent must be 0-100"})
+        return await _camera_call(request, "set_zoom", percent=percent)
+
+    @app.post("/api/ble/auto-connect")
+    async def ble_auto_connect(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
+        """BLE scan → pair → GATT connect → read COHN status → store credentials.
+
+        If COHN IP from BLE is incomplete, falls back to mDNS discovery.
+        """
+        try:
+            from gomaxwebcam.ble.scanner import BLEScanner
+            from gomaxwebcam.ble.gatt_client import GoProBLEClient
+            from gomaxwebcam.ble.cohn import COHNProvisioner
+
+            # Step 1: BLE scan
+            scanner = BLEScanner(scan_timeout=10.0)
+            gopros = await scanner.scan_once(timeout=10.0)
+            named = [g for g in gopros if "GoPro" in g.name]
+            if not named:
+                return JSONResponse(content={"ok": False, "error": "No GoPro found via Bluetooth. Make sure it's powered on."})
+
+            target = named[0]
+            log.info("BLE auto-connect: found %s @ %s", target.name, target.address)
+
+            # Step 2: GATT connect (includes pairing)
+            client = GoProBLEClient(address=target.address)
+            if not await client.connect(timeout=20.0):
+                return JSONResponse(content={"ok": False, "error": "BLE connection failed. Try putting the camera in pairing mode (Preferences > Connections > Connect Device)."})
+
+            try:
+                # Step 3: Query COHN status
+                provisioner = COHNProvisioner(ble_client=client)
+                creds = await provisioner.get_status()
+
+                if not creds.password:
+                    return JSONResponse(content={
+                        "ok": False,
+                        "error": "Camera is not provisioned for COHN yet. Use the GoPro Quik app to set up COHN first, then try again. Or use Quick Connect with manual credentials.",
+                    })
+
+                # Step 4: Validate/fix IP address
+                ip = creds.ip_address or ""
+                # BLE sometimes returns truncated IP — fall back to mDNS
+                if not ip or ip.count(".") < 3 or ip.endswith("."):
+                    log.warning("BLE returned incomplete IP '%s', trying mDNS...", ip)
+                    try:
+                        from zeroconf import Zeroconf, ServiceBrowser
+                        import asyncio
+                        from gomaxwebcam.discovery import find_gopro_device
+                        # Quick mDNS scan
+                        import subprocess, json as _json
+                        result = subprocess.run(
+                            ["python", "-c",
+                             "import asyncio; from zeroconf import Zeroconf, ServiceBrowser; "
+                             "zc = Zeroconf(); "
+                             "import time; time.sleep(3); "
+                             "info = zc.get_service_info('_gopro-web._tcp.local.', "
+                             f"'C3531350067212._gopro-web._tcp.local.'); "
+                             "print(info.parsed_addresses()[0] if info else ''); zc.close()"],
+                            capture_output=True, text=True, timeout=10)
+                        mdns_ip = result.stdout.strip()
+                        if mdns_ip and mdns_ip.count(".") == 3:
+                            ip = mdns_ip
+                            log.info("mDNS found camera at %s", ip)
+                    except Exception as e:
+                        log.debug("mDNS fallback failed: %s", e)
+
+                if not ip or ip.count(".") < 3:
+                    return JSONResponse(content={
+                        "ok": False,
+                        "error": "Could not determine camera IP. Try Quick Connect and enter the IP manually.",
+                    })
+
+                # Step 5: Verify HTTP connectivity
+                import httpx
+                try:
+                    async with httpx.AsyncClient(verify=False, timeout=5.0,
+                                                  auth=httpx.BasicAuth(creds.username, creds.password)) as hc:
+                        r = await hc.get(f"https://{ip}/gopro/camera/info")
+                        r.raise_for_status()
+                        cam_info = r.json()
+                        log.info("HTTP verified: %s at %s", cam_info.get("model_name", "GoPro"), ip)
+                except Exception as e:
+                    log.warning("HTTP verify failed: %s", e)
+                    return JSONResponse(content={
+                        "ok": False,
+                        "error": f"Camera found but HTTPS connection to {ip} failed. Make sure your PC and camera are on the same WiFi network.",
+                    })
+
+                # Step 6: Store and activate
+                api: CameraAPI = request.app.state.camera_api
+                api.set_cohn_credentials(ip, creds.username, creds.password)
+
+                try:
+                    from gomaxwebcam.transport.cohn_persistence import CohnCredentialStore, StoredCOHNCredentials
+                    store = CohnCredentialStore()
+                    store.store_credentials(StoredCOHNCredentials(
+                        ip_address=ip,
+                        username=creds.username,
+                        password=creds.password,
+                        certificate=creds.certificate or "ble-auto",
+                        camera_serial=target.serial_suffix or "7212",
+                    ))
+                except Exception as e:
+                    log.warning("Failed to persist credentials: %s", e)
+
+                return JSONResponse(content={
+                    "ok": True,
+                    "ip": ip,
+                    "username": creds.username,
+                    "ssid": creds.ssid,
+                    "camera_name": target.name,
+                    "model": cam_info.get("model_name", "GoPro"),
+                })
+            finally:
+                await client.disconnect()
+
+        except Exception as e:
+            log.error("BLE auto-connect failed: %s", e, exc_info=True)
+            return JSONResponse(content={"ok": False, "error": str(e)})
+
+    @app.post("/api/cohn/credentials")
+    async def set_cohn_credentials(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
+        """Set or update COHN credentials for direct camera access."""
+        body = await request.json()
+        ip = body.get("ip", "")
+        user = body.get("username", "gopro")
+        password = body.get("password", "")
+        if not ip or not password:
+            return JSONResponse(status_code=400, content={"error": "ip and password required"})
+        api: CameraAPI = request.app.state.camera_api
+        api.set_cohn_credentials(ip, user, password)
+        # Store for persistence
+        try:
+            from gomaxwebcam.transport.cohn_persistence import CohnCredentialStore, StoredCOHNCredentials
+            store = CohnCredentialStore()
+            serial = body.get("serial", "7212")
+            store.store_credentials(StoredCOHNCredentials(
+                ip_address=ip, username=user, password=password,
+                certificate=body.get("certificate", "placeholder"),
+                camera_serial=serial,
+            ))
+        except Exception as e:
+            log.warning("Failed to persist COHN credentials: %s", e)
+        return JSONResponse(content={"ok": True, "ip": ip})
+
+    @app.post("/api/camera/webcam/start")
+    async def webcam_start(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
+        return await _camera_call(request, "webcam_start")
+
+    @app.post("/api/camera/webcam/stop")
+    async def webcam_stop(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
+        return await _camera_call(request, "webcam_stop")
+
+    @app.get("/api/camera/webcam/status")
+    async def webcam_status(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
+        return await _camera_call(request, "webcam_status")
+
+    @app.post("/api/camera/preview/start")
+    async def preview_start(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
+        return await _camera_call(request, "preview_start")
+
+    @app.post("/api/camera/preview/stop")
+    async def preview_stop(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
+        return await _camera_call(request, "preview_stop")
+
     # -- Health (no auth required) --
 
     @app.get("/health")

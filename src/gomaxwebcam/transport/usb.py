@@ -471,6 +471,10 @@ class USBTransport(Transport):
     # ------------------------------------------------------------------
 
     @property
+    def gopro_handle(self) -> Any:
+        return self._gopro
+
+    @property
     def serial(self) -> str | None:
         return self._serial
 

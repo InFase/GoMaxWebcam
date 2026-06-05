@@ -87,12 +87,25 @@ class BLEScanner:
                 adapter=self._adapter,
             )
 
-            devices = await scanner.discover(timeout=timeout)
+            adv_map = {}
+
+            def _detection_cb(device, adv_data):
+                adv_map[device.address] = (device, adv_data)
+
+            scanner2 = BleakScanner(
+                detection_callback=_detection_cb,
+                service_uuids=[GOPRO_SERVICE_UUID],
+                adapter=self._adapter,
+            )
+            await scanner2.start()
+            await asyncio.sleep(timeout)
+            await scanner2.stop()
+
             gopros = []
 
-            for device in devices:
-                if self._is_gopro(device):
-                    gopro = self._make_discovered(device)
+            for addr, (device, adv_data) in adv_map.items():
+                if self._is_gopro_adv(device, adv_data):
+                    gopro = self._make_discovered(device, adv_data)
                     gopros.append(gopro)
                     log.info(
                         "Found GoPro: %s (%s, RSSI=%ddBm)",
@@ -138,14 +151,15 @@ class BLEScanner:
             def _detection_callback(device, advertisement_data):
                 if device.address in seen:
                     return
-                if self._is_gopro(device):
-                    seen.add(device.address)
-                    gopro = self._make_discovered(device, advertisement_data)
-                    log.info(
-                        "Discovered GoPro: %s (%s)",
-                        gopro.name, gopro.address,
-                    )
-                    callback(gopro)
+                if not self._is_gopro_adv(device, advertisement_data):
+                    return
+                seen.add(device.address)
+                gopro = self._make_discovered(device, advertisement_data)
+                log.info(
+                    "Discovered GoPro: %s (%s)",
+                    gopro.name, gopro.address,
+                )
+                callback(gopro)
 
             scanner = BleakScanner(
                 detection_callback=_detection_callback,
@@ -189,34 +203,40 @@ class BLEScanner:
 
     @staticmethod
     def _is_gopro(device) -> bool:
-        """Check if a BLE device is a GoPro camera.
+        """Check if a BLE device is a GoPro camera (legacy, no adv_data)."""
+        name = device.name or ""
+        return any(name.startswith(prefix) for prefix in GOPRO_NAME_PREFIXES)
+
+    @staticmethod
+    def _is_gopro_adv(device, adv_data) -> bool:
+        """Check if a BLE device is a GoPro using AdvertisementData.
 
         Matches on:
-          1. Service UUID matches GOPRO_SERVICE_UUID, OR
-          2. Device name starts with known GoPro prefix
+          1. Device name starts with known GoPro prefix, OR
+          2. AdvertisementData.service_uuids contains GOPRO_SERVICE_UUID
+
+        On Windows, the name is frequently missing from GoPro BLE
+        advertisements, so the service UUID check is essential.
         """
-        name = device.name or ""
+        name = adv_data.local_name or device.name or ""
         if any(name.startswith(prefix) for prefix in GOPRO_NAME_PREFIXES):
             return True
 
-        # Check metadata for service UUIDs if available
-        if hasattr(device, "metadata"):
-            uuids = device.metadata.get("uuids", [])
-            if GOPRO_SERVICE_UUID in uuids:
-                return True
+        service_uuids = getattr(adv_data, "service_uuids", []) or []
+        if GOPRO_SERVICE_UUID in service_uuids:
+            return True
 
         return False
 
     @staticmethod
     def _make_discovered(device, adv_data=None) -> DiscoveredGoPro:
         """Create a DiscoveredGoPro from a bleak device."""
-        name = device.name or "Unknown GoPro"
-        rssi = -100
-
         if adv_data is not None:
+            name = adv_data.local_name or device.name or "Unknown GoPro"
             rssi = getattr(adv_data, "rssi", -100) or -100
-        elif hasattr(device, "rssi"):
-            rssi = device.rssi or -100
+        else:
+            name = device.name or "Unknown GoPro"
+            rssi = -100
 
         # Extract serial suffix from name (last 4 chars after "GoPro " prefix)
         serial_suffix = ""

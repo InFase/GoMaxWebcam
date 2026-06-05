@@ -112,6 +112,14 @@ class GoProBLEClient:
             await self._client.connect()
             self._connected = True
 
+            # Pair/bond with the camera — required for encrypted characteristics
+            try:
+                if hasattr(self._client, "pair"):
+                    paired = await self._client.pair()
+                    log.info("BLE pairing result: %s", paired)
+            except Exception as e:
+                log.debug("BLE pairing attempt: %s (may already be paired)", e)
+
             # Negotiate MTU if possible
             if hasattr(self._client, "mtu_size"):
                 actual_mtu = self._client.mtu_size
@@ -195,6 +203,18 @@ class GoProBLEClient:
         return await self._write_and_wait(
             request_uuid=COMMAND_REQUEST_UUID,
             response_uuid=COMMAND_RESPONSE_UUID,
+            data=data,
+        )
+
+    async def write_query(self, data: bytes) -> bytes | None:
+        """Write a query to the GoPro and wait for the response.
+
+        Uses the Query Request/Response characteristic pair.
+        COHN status queries use this path.
+        """
+        return await self._write_and_wait(
+            request_uuid=QUERY_REQUEST_UUID,
+            response_uuid=QUERY_RESPONSE_UUID,
             data=data,
         )
 
@@ -370,7 +390,7 @@ class GoProBLEClient:
                     timeout=GATT_TIMEOUT_S,
                 )
 
-            # Wait for response notification
+            # Wait for first response notification
             try:
                 await asyncio.wait_for(event.wait(), timeout=timeout)
             except asyncio.TimeoutError:
@@ -378,9 +398,11 @@ class GoProBLEClient:
                     "Response timeout waiting for %s (wrote %d bytes to %s)",
                     response_uuid[-8:], len(data), request_uuid[-8:],
                 )
-                # Return what we have, if anything
                 buf = self._response_buffers.get(response_uuid, bytearray())
                 return bytes(buf) if buf else None
+
+            # Wait briefly for continuation packets to arrive
+            await asyncio.sleep(0.3)
 
             # Return accumulated response
             buf = self._response_buffers.get(response_uuid, bytearray())

@@ -119,6 +119,11 @@ class Transport(ABC):
     def is_streaming(self) -> bool:
         return self._state == TransportState.STREAMING
 
+    @property
+    def gopro_handle(self) -> Any:
+        """Return the open-gopro SDK handle (WiredGoPro or WirelessGoPro), or None."""
+        return None
+
     # -- State management --
 
     def _set_state(self, new_state: TransportState) -> None:

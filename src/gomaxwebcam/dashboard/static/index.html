@@ -583,13 +583,21 @@ kbd.wide { padding: 2px 14px; }
      ═══════════════════════════════════════════ -->
 <aside class="sidebar">
   <div class="sidebar-brand">
-    <span class="brand-dot" :class="_camDotClass()" :title="_camDotTitle()"></span>
+    <span class="brand-dot" :class="camState.connected ? 'cam-live' : 'cam-idle'" :title="camState.connected ? 'Camera connected' : 'Camera not connected'"></span>
     <span>GoMaxWebcam</span>
   </div>
   <nav class="sidebar-nav">
     <a :class="{ active: page === 'home' }" @click="page = 'home'">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1"/></svg>
-      <span>Home</span>
+      <span>Overview</span>
+    </a>
+    <a :class="{ active: page === 'camera' }" @click="page = 'camera'; refreshCameraState(); loadPresets();">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+      <span>Camera</span>
+    </a>
+    <a :class="{ active: page === 'media' }" @click="page = 'media'; if(!mediaFiles.length) loadMediaList();">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2"/><circle cx="8" cy="14" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+      <span>Media</span>
     </a>
     <a :class="{ active: page === 'settings' }" @click="page = 'settings'">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -606,15 +614,13 @@ kbd.wide { padding: 2px 14px; }
   </nav>
   <div class="sidebar-footer">
     v2.0 &middot; <span x-text="uptime">0s</span>
-    <!-- Camera connection status -->
-    <div class="cam-indicator" :title="_camDotTitle()">
-      <span class="cam-dot" :class="_camDotClass()"></span>
-      <span x-text="_camLabel()">No Camera</span>
+    <div class="cam-indicator" :title="camState.connected ? 'Connected to ' + (cameraInfo.model_name || 'GoPro') : 'Camera not reachable'">
+      <span class="cam-dot" :class="camState.connected ? 'cam-live' : 'cam-idle'"></span>
+      <span x-text="camState.connected ? (cameraInfo.model_name || 'GoPro') : 'No Camera'"></span>
     </div>
-    <!-- SSE live-feed connection status (connected / reconnecting / disconnected) -->
-    <div class="sse-indicator" :title="_sseStatusTitle()">
-      <span class="sse-dot" :class="_sseDotClass()"></span>
-      <span x-text="_sseStatusLabel()">Connecting…</span>
+    <div class="sse-indicator" x-show="camState.connected" :title="'Battery: ' + camState.battery + '%'">
+      <span style="font-size:0.7rem;">&#x1F50B;</span>
+      <span x-text="camState.battery >= 0 ? camState.battery + '%' : '--'"></span>
     </div>
     <div class="kbd-footer-hint" @click="showShortcuts = true" title="Keyboard shortcuts">
       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M10 13h4"/></svg>
@@ -628,60 +634,47 @@ kbd.wide { padding: 2px 14px; }
      ═══════════════════════════════════════════ -->
 <div class="main-area">
 
-  <!-- ══════════════ HOME PAGE ══════════════ -->
+  <!-- ══════════════ HOME / OVERVIEW PAGE ══════════════ -->
   <div class="page" :class="{ active: page === 'home' }">
-    <div class="page-header">
-      <h2>Dashboard</h2>
-      <div style="display:flex;align-items:center;gap:10px;">
-        <button class="btn-preview" @click="showPreview = true" title="Open live preview (L)">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          Live Preview
-        </button>
-        <i class="help-btn" @click="showShortcuts = true" title="Keyboard shortcuts (?)">?</i>
+    <div class="page-header"><h2>Overview</h2></div>
+
+    <!-- Camera Info -->
+    <div class="card">
+      <div class="card-title">Camera</div>
+      <div class="stat-grid">
+        <div class="stat-item"><div class="stat-label">Model</div><div class="stat-value" x-text="cameraInfo.model_name || '--'"></div></div>
+        <div class="stat-item"><div class="stat-label">Firmware</div><div class="stat-value" x-text="cameraInfo.firmware_version || '--'"></div></div>
+        <div class="stat-item"><div class="stat-label">Serial</div><div class="stat-value" x-text="cameraInfo.serial_number || '--'"></div></div>
+        <div class="stat-item"><div class="stat-label">WiFi Name</div><div class="stat-value" x-text="cameraInfo.ap_ssid || '--'"></div></div>
       </div>
     </div>
 
-    <!-- Hero status -->
+    <!-- Live Status -->
     <div class="card">
-      <div class="hero-status">
-        <div class="big-dot" :class="status.state"></div>
-        <div>
-          <span class="hero-label" x-text="status.state_label"></span>
-          <div style="font-size:0.78rem;color:var(--gp-muted);margin-top:4px;" x-show="status.hint" x-text="status.hint"></div>
-        </div>
-      </div>
+      <div class="card-title">Status</div>
       <div class="stat-grid">
         <div class="stat-item">
-          <div class="stat-label">Transport</div>
-          <div class="stat-value" x-text="status.transport || '--'"></div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-label">Battery</div>
-          <div class="stat-value" x-text="status.battery != null ? status.battery + '%' : '--'"></div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-label">Resolution</div>
-          <div class="stat-value" x-text="status.resolution || '--'"></div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-label">Camera</div>
-          <div class="stat-value" x-text="status.camera_model || '--'"></div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-label">Stream Health</div>
-          <div class="stat-value">
-            <span class="health-badge"
-                  :class="{ 'health-healthy': diagnostics.health === 'healthy',
-                             'health-degraded': diagnostics.health === 'degraded',
-                             'health-unhealthy': diagnostics.health === 'unhealthy',
-                             'health-unknown': diagnostics.health === 'unknown' }"
-                  x-text="diagnostics.health ? diagnostics.health.charAt(0).toUpperCase() + diagnostics.health.slice(1) : 'Unknown'"></span>
+          <div class="stat-label">Connection</div>
+          <div class="stat-value" style="display:flex;align-items:center;gap:6px;">
+            <span class="status-dot" :class="camState.connected ? 'streaming' : 'error'" style="margin:0;"></span>
+            <span x-text="camState.connected ? 'Connected' : 'Disconnected'"></span>
           </div>
         </div>
-        <div class="stat-item">
-          <div class="stat-label">Uptime</div>
-          <div class="stat-value" x-text="uptime"></div>
-        </div>
+        <div class="stat-item"><div class="stat-label">Battery</div><div class="stat-value" x-text="camState.battery >= 0 ? camState.battery + '%' : '--'"></div></div>
+        <div class="stat-item"><div class="stat-label">Storage</div><div class="stat-value" x-text="camState.remainingSpaceGb || '--'"></div></div>
+        <div class="stat-item"><div class="stat-label">Mode</div><div class="stat-value" x-text="camState.mode || '--'"></div></div>
+        <div class="stat-item"><div class="stat-label">Recording</div><div class="stat-value" :style="camState.encoding ? 'color:var(--gp-red)' : ''" x-text="camState.encoding ? 'Recording' : 'Idle'"></div></div>
+        <div class="stat-item"><div class="stat-label">Video Time Left</div><div class="stat-value" x-text="formatDuration(camState.remainingVideoTime)"></div></div>
+      </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="card">
+      <div class="card-title">Quick Actions</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn" @click="page='camera'" style="background:var(--gp-accent);color:white;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:600;">Camera Control</button>
+        <button class="btn" @click="page='media'; if(!mediaFiles.length) loadMediaList();" style="background:var(--gp-surface);border:1px solid var(--gp-border);color:var(--gp-text);padding:10px 20px;border-radius:8px;cursor:pointer;">Browse Media</button>
+        <button class="btn" @click="page='settings'" style="background:var(--gp-surface);border:1px solid var(--gp-border);color:var(--gp-text);padding:10px 20px;border-radius:8px;cursor:pointer;">Settings</button>
       </div>
     </div>
   </div>
@@ -854,77 +847,76 @@ kbd.wide { padding: 2px 14px; }
   <!-- ══════════════ DIAGNOSTICS PAGE ══════════════ -->
   <div class="page" :class="{ active: page === 'diagnostics' }">
     <div class="page-header">
-      <h2>Diagnostics
-        <span class="health-badge"
-              :class="{ 'health-healthy': diagnostics.health === 'healthy',
-                         'health-degraded': diagnostics.health === 'degraded',
-                         'health-unhealthy': diagnostics.health === 'unhealthy',
-                         'health-unknown': diagnostics.health === 'unknown' }"
-              x-text="diagnostics.health ? diagnostics.health.charAt(0).toUpperCase() + diagnostics.health.slice(1) : 'Unknown'"></span>
-      </h2>
+      <h2>Diagnostics</h2>
       <button class="btn" @click="exportDiagnostics()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
         Export
       </button>
     </div>
 
-    <!-- FPS Chart -->
+    <!-- Camera Hardware Info -->
     <div class="card">
-      <div class="card-title">Pipeline FPS</div>
-      <div class="chart-wrap">
-        <canvas x-ref="chartFps"></canvas>
+      <div class="card-title">Camera Hardware</div>
+      <div class="stat-grid">
+        <div class="stat-item"><div class="stat-label">Model</div><div class="stat-value" x-text="cameraInfo.model_name || '--'"></div></div>
+        <div class="stat-item"><div class="stat-label">Firmware</div><div class="stat-value" x-text="cameraInfo.firmware_version || '--'"></div></div>
+        <div class="stat-item"><div class="stat-label">Serial</div><div class="stat-value" style="font-size:0.85rem;" x-text="cameraInfo.serial_number || '--'"></div></div>
+        <div class="stat-item"><div class="stat-label">AP SSID</div><div class="stat-value" x-text="cameraInfo.ap_ssid || '--'"></div></div>
       </div>
     </div>
 
-    <!-- Jitter Chart -->
+    <!-- Connection Info -->
     <div class="card">
-      <div class="card-title">Jitter (ms)</div>
-      <div class="chart-wrap">
-        <canvas x-ref="chartJitter"></canvas>
+      <div class="card-title">Connection</div>
+      <div class="stat-grid">
+        <div class="stat-item">
+          <div class="stat-label">Status</div>
+          <div class="stat-value" style="display:flex;align-items:center;gap:6px;">
+            <span class="status-dot" :class="camState.connected ? 'streaming' : 'error'" style="margin:0;"></span>
+            <span x-text="camState.connected ? 'Connected' : 'Disconnected'"></span>
+          </div>
+        </div>
+        <div class="stat-item"><div class="stat-label">Method</div><div class="stat-value">COHN (HTTPS)</div></div>
+        <div class="stat-item"><div class="stat-label">WiFi Network</div><div class="stat-value" x-text="camState.connected ? (diagWifiSsid || '--') : '--'"></div></div>
+        <div class="stat-item"><div class="stat-label">App Uptime</div><div class="stat-value" x-text="uptime"></div></div>
       </div>
     </div>
 
-    <!-- Decode Latency Chart -->
+    <!-- Camera Status Detail -->
     <div class="card">
-      <div class="card-title">Decode Latency (ms)</div>
-      <div class="chart-wrap">
-        <canvas x-ref="chartDecode"></canvas>
+      <div class="card-title">Camera Status (Live)</div>
+      <div class="stat-grid">
+        <div class="stat-item"><div class="stat-label">Battery</div><div class="stat-value" x-text="camState.battery >= 0 ? camState.battery + '%' : '--'"></div></div>
+        <div class="stat-item"><div class="stat-label">Storage Free</div><div class="stat-value" x-text="camState.remainingSpaceGb || '--'"></div></div>
+        <div class="stat-item"><div class="stat-label">Photos Left</div><div class="stat-value" x-text="camState.remainingPhotos ? camState.remainingPhotos.toLocaleString() : '--'"></div></div>
+        <div class="stat-item"><div class="stat-label">Video Time Left</div><div class="stat-value" x-text="formatDuration(camState.remainingVideoTime)"></div></div>
+        <div class="stat-item"><div class="stat-label">Recording</div><div class="stat-value" :style="camState.encoding ? 'color:var(--gp-red)' : ''" x-text="camState.encoding ? 'Yes (' + formatDuration(camState.videoDuration) + ')' : 'No'"></div></div>
+        <div class="stat-item"><div class="stat-label">Mode</div><div class="stat-value" x-text="camState.mode || '--'"></div></div>
       </div>
     </div>
 
-    <!-- Stats row -->
-    <div class="diag-stats">
-      <div class="diag-stat">
-        <div class="ds-val" x-text="diagnostics.avg_decode_ms.toFixed(1)"></div>
-        <div class="ds-lbl">Avg Decode (ms)</div>
+    <!-- Raw Camera Settings (collapsible) -->
+    <div class="card">
+      <div class="card-title" style="cursor:pointer;" @click="showRawSettings = !showRawSettings">
+        Raw Camera Settings
+        <span style="float:right;color:var(--gp-muted);" x-text="showRawSettings ? '▲' : '▼'"></span>
       </div>
-      <div class="diag-stat">
-        <div class="ds-val" x-text="diagnostics.avg_jitter_ms.toFixed(1)"></div>
-        <div class="ds-lbl">Avg Jitter (ms)</div>
-      </div>
-      <div class="diag-stat">
-        <div class="ds-val" x-text="(diagnostics.drop_rate * 100).toFixed(2) + '%'"></div>
-        <div class="ds-lbl">Drop Rate</div>
-      </div>
-      <div class="diag-stat">
-        <div class="ds-val" style="color:var(--gp-red);" x-text="diagnostics.frame_drops"></div>
-        <div class="ds-lbl">Frame Drops</div>
+      <div x-show="showRawSettings" style="max-height:300px;overflow-y:auto;">
+        <pre style="font-size:0.7rem;color:var(--gp-muted);white-space:pre-wrap;word-break:break-all;margin:0;" x-text="JSON.stringify(diagRawSettings, null, 2)"></pre>
       </div>
     </div>
 
-    <!-- Transport Timeline -->
-    <div class="card">
-      <div class="card-title">Transport Timeline</div>
-      <div class="transport-timeline">
-        <template x-for="seg in transportTimeline" :key="seg.id">
-          <div class="tl-seg" :class="seg.type" :title="seg.label" :style="'flex:' + seg.weight"></div>
-        </template>
-      </div>
-      <div style="display:flex;gap:16px;margin-top:8px;font-size:0.7rem;color:var(--gp-muted);">
-        <span><span style="display:inline-block;width:10px;height:10px;background:var(--gp-green);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>USB</span>
-        <span><span style="display:inline-block;width:10px;height:10px;background:var(--gp-cyan);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>COHN</span>
-        <span><span style="display:inline-block;width:10px;height:10px;background:var(--gp-yellow);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>WiFi AP</span>
-        <span><span style="display:inline-block;width:10px;height:10px;background:var(--gp-border);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>None</span>
+    <!-- Pipeline Charts (only visible when pipeline is active) -->
+    <div class="card" x-show="diagnostics.health !== 'unknown'">
+      <div class="card-title">Pipeline Performance</div>
+      <div class="chart-wrap"><canvas x-ref="chartFps"></canvas></div>
+      <div class="chart-wrap" style="margin-top:12px;"><canvas x-ref="chartJitter"></canvas></div>
+      <div class="chart-wrap" style="margin-top:12px;"><canvas x-ref="chartDecode"></canvas></div>
+      <div class="diag-stats" style="margin-top:12px;">
+        <div class="diag-stat"><div class="ds-val" x-text="diagnostics.avg_decode_ms.toFixed(1)"></div><div class="ds-lbl">Avg Decode (ms)</div></div>
+        <div class="diag-stat"><div class="ds-val" x-text="diagnostics.avg_jitter_ms.toFixed(1)"></div><div class="ds-lbl">Avg Jitter (ms)</div></div>
+        <div class="diag-stat"><div class="ds-val" x-text="(diagnostics.drop_rate * 100).toFixed(2) + '%'"></div><div class="ds-lbl">Drop Rate</div></div>
+        <div class="diag-stat"><div class="ds-val" style="color:var(--gp-red);" x-text="diagnostics.frame_drops"></div><div class="ds-lbl">Frame Drops</div></div>
       </div>
     </div>
   </div>
@@ -947,20 +939,239 @@ kbd.wide { padding: 2px 14px; }
       </button>
     </div>
 
+    <!-- Quick Connect (manual COHN credentials) -->
+    <div class="card">
+      <div class="card-title">Quick Connect (Manual)</div>
+      <p style="font-size:0.85rem;color:var(--gp-muted);margin:0 0 12px;">
+        Already have COHN credentials? Enter them here to connect directly.
+        You can find these in the GoPro Quik app under Connections &gt; Camera Info.
+      </p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+        <div style="flex:1;min-width:140px;">
+          <label style="font-size:0.75rem;color:var(--gp-muted);display:block;margin-bottom:4px;">Camera IP</label>
+          <input type="text" x-model="manualCohnIp" placeholder="192.168.1.x"
+            style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gp-border);background:var(--gp-surface);color:var(--gp-text);font-size:0.9rem;">
+        </div>
+        <div style="flex:1;min-width:100px;">
+          <label style="font-size:0.75rem;color:var(--gp-muted);display:block;margin-bottom:4px;">Username</label>
+          <input type="text" x-model="manualCohnUser" placeholder="gopro"
+            style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gp-border);background:var(--gp-surface);color:var(--gp-text);font-size:0.9rem;">
+        </div>
+        <div style="flex:1;min-width:120px;">
+          <label style="font-size:0.75rem;color:var(--gp-muted);display:block;margin-bottom:4px;">Password</label>
+          <input type="text" x-model="manualCohnPass" placeholder="COHN password"
+            style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gp-border);background:var(--gp-surface);color:var(--gp-text);font-size:0.9rem;">
+        </div>
+        <button @click="connectManualCohn()"
+          style="padding:8px 20px;border-radius:6px;border:none;background:var(--gp-accent);color:white;cursor:pointer;font-weight:600;white-space:nowrap;">
+          Connect
+        </button>
+      </div>
+    </div>
+
+    <!-- BLE Auto-Connect -->
+    <div class="card">
+      <div class="card-title">Auto-Connect via Bluetooth</div>
+      <p style="font-size:0.85rem;color:var(--gp-muted);margin:0 0 12px;">
+        Scans for your GoPro via Bluetooth and retrieves COHN credentials automatically.
+        Make sure your GoPro is on and Bluetooth is enabled on your PC.
+      </p>
+      <button @click="bleAutoConnect()" :disabled="bleConnecting"
+        style="padding:8px 20px;border-radius:6px;border:none;background:var(--gp-green);color:white;cursor:pointer;font-weight:600;">
+        <span x-text="bleConnecting ? 'Connecting...' : 'Auto-Connect via BLE'"></span>
+      </button>
+      <div x-show="bleStatus" style="margin-top:8px;font-size:0.85rem;color:var(--gp-muted);" x-text="bleStatus"></div>
+    </div>
+
     <!-- Current COHN Status -->
     <div class="card">
-      <div class="card-title">Current COHN Status</div>
+      <div class="card-title">Current Connection Status</div>
       <div class="stat-grid">
         <div class="stat-item">
           <div class="stat-label">Camera</div>
-          <div class="stat-value" x-text="status.camera_model || '--'"></div>
+          <div class="stat-value" x-text="cameraInfo.model_name || '--'"></div>
         </div>
         <div class="stat-item">
-          <div class="stat-label">COHN Transport</div>
-          <div class="stat-value" x-text="status.transport === 'COHN' ? 'Active' : 'Standby'"></div>
+          <div class="stat-label">Connection</div>
+          <div class="stat-value" style="display:flex;align-items:center;gap:6px;">
+            <span class="status-dot" :class="camState.connected ? 'streaming' : 'error'" style="margin:0;"></span>
+            <span x-text="camState.connected ? 'Connected (COHN)' : 'Not Connected'"></span>
+          </div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">WiFi Network</div>
+          <div class="stat-value" x-text="camState.connected ? (cameraInfo.ap_ssid || '--') : '--'"></div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Serial</div>
+          <div class="stat-value" x-text="cameraInfo.serial_number || '--'"></div>
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- ══════════════ CAMERA CONTROL PAGE ══════════════ -->
+  <div class="page" :class="{ active: page === 'camera' }">
+    <div class="page-header">
+      <h2>Camera Control</h2>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span class="status-dot" :class="camState.connected ? 'streaming' : 'error'"></span>
+        <span style="font-size:0.85rem;" x-text="camState.connected ? (cameraInfo.model_name || 'Connected') : 'Not Connected'"></span>
+      </div>
+    </div>
+
+    <!-- Not connected banner -->
+    <div x-show="!camState.connected" class="card" style="border-color:var(--gp-yellow);background:rgba(234,179,8,0.05);">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span style="font-size:1.5rem;">&#x1F4F7;</span>
+        <div>
+          <div style="font-weight:600;">No camera connected</div>
+          <div style="font-size:0.85rem;color:var(--gp-muted);margin-top:4px;">
+            Go to <a href="#" @click.prevent="page='setup'" style="color:var(--gp-accent);text-decoration:underline;">Setup</a>
+            to connect your GoPro via Bluetooth or enter COHN credentials manually.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recording -->
+    <div class="card">
+      <div class="card-title">Recording</div>
+      <div style="display:flex;align-items:center;gap:20px;">
+        <button @click="toggleRecord()"
+          style="width:64px;height:64px;border-radius:50%;border:3px solid var(--gp-red);background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;"
+          :style="camState.encoding ? 'border-color:var(--gp-red);box-shadow:0 0 12px var(--gp-red)' : ''">
+          <div :style="camState.encoding ? 'width:24px;height:24px;border-radius:4px;background:var(--gp-red)' : 'width:40px;height:40px;border-radius:50%;background:var(--gp-red)'"></div>
+        </button>
+        <div>
+          <div style="font-size:1.1rem;font-weight:700;" x-text="camState.encoding ? 'Recording...' : 'Ready'"></div>
+          <div style="color:var(--gp-muted);font-size:0.85rem;" x-text="camState.encoding ? ('Duration: ' + formatDuration(camState.videoDuration)) : 'Tap to start recording'"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mode / Presets -->
+    <div class="card">
+      <div class="card-title">Mode</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+        <template x-for="group in presetGroups" :key="group.id">
+          <button @click="loadPresetGroup(group.id)"
+            :style="'padding:10px 20px;border-radius:8px;border:1px solid ' + (group.id === activeGroup ? 'var(--gp-accent)' : 'var(--gp-border)') + ';background:' + (group.id === activeGroup ? 'var(--gp-accent)' : 'var(--gp-surface)') + ';color:var(--gp-text);cursor:pointer;font-weight:600;'"
+            x-text="groupName(group.id)"></button>
+        </template>
+      </div>
+      <!-- Sub-presets for active group -->
+      <template x-for="group in presetGroups" :key="'sub-'+group.id">
+        <div x-show="group.id === activeGroup" style="display:flex;gap:6px;flex-wrap:wrap;">
+          <template x-for="preset in group.presets" :key="preset.id">
+            <button @click="loadPreset(preset.id)"
+              style="padding:6px 12px;border-radius:6px;border:1px solid var(--gp-border);background:var(--gp-surface);color:var(--gp-muted);cursor:pointer;font-size:0.8rem;"
+              x-text="preset.title"></button>
+          </template>
+        </div>
+      </template>
+      <div x-show="presetGroups.length === 0" style="color:var(--gp-muted);font-size:0.85rem;">Connect camera to load presets</div>
+    </div>
+
+    <!-- Webcam / Preview -->
+    <div class="card">
+      <div class="card-title">Webcam Preview</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button @click="startWebcam()" x-show="!camState.webcamActive"
+          style="padding:8px 16px;border-radius:8px;border:1px solid var(--gp-green);background:transparent;color:var(--gp-green);cursor:pointer;font-weight:600;">
+          Start Webcam
+        </button>
+        <button @click="stopWebcam()" x-show="camState.webcamActive"
+          style="padding:8px 16px;border-radius:8px;border:1px solid var(--gp-red);background:transparent;color:var(--gp-red);cursor:pointer;font-weight:600;">
+          Stop Webcam
+        </button>
+        <span x-show="camState.webcamActive" style="color:var(--gp-green);font-size:0.85rem;">Streaming on UDP :8554</span>
+      </div>
+      <p style="font-size:0.78rem;color:var(--gp-muted);margin:8px 0 0;">Starts the GoPro webcam MPEG-TS stream. Use VLC or OBS to view: udp://@:8554</p>
+    </div>
+
+    <!-- Zoom -->
+    <div class="card">
+      <div class="card-title">Digital Zoom</div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span style="color:var(--gp-muted);">1x</span>
+        <input type="range" min="0" max="100" x-model="zoomPercent" @change="setZoom()" style="flex:1;">
+        <span style="color:var(--gp-muted);">Max</span>
+      </div>
+    </div>
+
+    <!-- Power -->
+    <div class="card">
+      <div class="card-title">Power</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button @click="sleepCamera()"
+          style="padding:8px 16px;border-radius:8px;border:1px solid var(--gp-border);background:var(--gp-surface);color:var(--gp-muted);cursor:pointer;">
+          Sleep
+        </button>
+        <button @click="wakeCamera()"
+          style="padding:8px 16px;border-radius:8px;border:1px solid var(--gp-green);background:transparent;color:var(--gp-green);cursor:pointer;">
+          Wake (BLE)
+        </button>
+        <button @click="if(confirm('Reboot camera?')) rebootCamera()"
+          style="padding:8px 16px;border-radius:8px;border:1px solid var(--gp-yellow);background:transparent;color:var(--gp-yellow);cursor:pointer;">
+          Reboot
+        </button>
+      </div>
+      <p style="font-size:0.75rem;color:var(--gp-muted);margin:8px 0 0;">Sleep puts the camera in low-power mode. Wake uses Bluetooth to bring it back.</p>
+    </div>
+  </div>
+
+  <!-- ══════════════ MEDIA BROWSER PAGE ══════════════ -->
+  <div class="page" :class="{ active: page === 'media' }">
+    <div class="page-header">
+      <h2>Media Browser<span style="font-size:0.85rem;color:var(--gp-muted);margin-left:12px;" x-text="mediaFiles.length ? mediaFiles.length + ' files' : ''"></span></h2>
+      <button @click="loadMediaList()" style="padding:6px 14px;border-radius:6px;border:1px solid var(--gp-border);background:var(--gp-surface);color:var(--gp-text);cursor:pointer;">Refresh</button>
+    </div>
+
+    <div x-show="mediaFiles.length === 0" style="color:var(--gp-muted);text-align:center;padding:40px;">
+      <p>No media files found. Click Refresh to load from camera.</p>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;">
+      <template x-for="file in mediaFiles" :key="file.path">
+        <div class="card" style="padding:0;overflow:hidden;cursor:pointer;" @click="selectedMedia = file">
+          <img :src="'/api/media/thumbnail?path=' + encodeURIComponent(file.path) + '&token=' + _token"
+            style="width:100%;aspect-ratio:16/9;object-fit:cover;background:var(--gp-surface);"
+            @error="$el.style.display='none'" loading="lazy">
+          <div style="padding:10px;">
+            <div style="font-size:0.8rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" x-text="file.filename"></div>
+            <div style="font-size:0.7rem;color:var(--gp-muted);" x-text="formatFileSize(file.size)"></div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- File detail modal -->
+    <template x-if="selectedMedia">
+      <div @click.self="selectedMedia=null" style="position:fixed;inset:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:200;">
+        <div class="card" style="max-width:500px;width:90%;">
+          <h3 x-text="selectedMedia.filename" style="margin-top:0;"></h3>
+          <div style="color:var(--gp-muted);margin-bottom:12px;">
+            <span x-text="formatFileSize(selectedMedia.size)"></span> &middot;
+            <span x-text="selectedMedia.directory"></span>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <a :href="'/api/media/download?path=' + encodeURIComponent(selectedMedia.path) + '&token=' + _token"
+              style="padding:8px 16px;border-radius:8px;background:var(--gp-accent);color:white;text-decoration:none;font-weight:600;">
+              Download
+            </a>
+            <button @click="deleteMedia(selectedMedia.path); selectedMedia=null"
+              style="padding:8px 16px;border-radius:8px;border:1px solid var(--gp-red);background:transparent;color:var(--gp-red);cursor:pointer;">
+              Delete
+            </button>
+            <button @click="selectedMedia=null"
+              style="padding:8px 16px;border-radius:8px;border:1px solid var(--gp-border);background:var(--gp-surface);color:var(--gp-text);cursor:pointer;margin-left:auto;">
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </template>
   </div>
 
 </div><!-- /.main-area -->
@@ -1165,7 +1376,7 @@ kbd.wide { padding: 2px 14px; }
       <!-- ── Navigation ── -->
       <div class="kbd-section-label">Navigation</div>
       <div class="kbd-row">
-        <div><div class="k-desc">Go to Dashboard</div></div>
+        <div><div class="k-desc">Go to Overview</div></div>
         <div class="kbd-keys"><kbd>H</kbd></div>
       </div>
       <div class="kbd-row">
@@ -1179,6 +1390,14 @@ kbd.wide { padding: 2px 14px; }
       <div class="kbd-row">
         <div><div class="k-desc">Go to Setup / Wizard</div></div>
         <div class="kbd-keys"><kbd>U</kbd></div>
+      </div>
+      <div class="kbd-row">
+        <div><div class="k-desc">Go to Camera Control</div></div>
+        <div class="kbd-keys"><kbd>C</kbd></div>
+      </div>
+      <div class="kbd-row">
+        <div><div class="k-desc">Go to Media Browser</div></div>
+        <div class="kbd-keys"><kbd>M</kbd></div>
       </div>
 
       <!-- ── Camera actions ── -->
@@ -1328,7 +1547,7 @@ function dashboard() {
 
   return {
     // ── Navigation ──
-    page: 'home',
+    page: 'camera',
     showPreview: false,
     showShortcuts: false,
 
@@ -1365,6 +1584,27 @@ function dashboard() {
       _progressSSE: null,
     },
 
+    // ── Camera Control ──
+    cameraInfo: {},
+    camState: { encoding: false, videoDuration: 0, battery: -1, remainingPhotos: 0, remainingVideoTime: 0, remainingSpaceGb: '', mode: '', connected: false, webcamActive: false },
+    showRawSettings: false,
+    diagRawSettings: {},
+    diagWifiSsid: '',
+    manualCohnIp: '',
+    manualCohnUser: 'gopro',
+    manualCohnPass: '',
+    bleConnecting: false,
+    bleStatus: '',
+    presetGroups: [],
+    activeGroup: 0,
+    zoomPercent: 0,
+
+    // ── Media Browser ──
+    mediaFiles: [],
+    selectedMedia: null,
+
+    // ── Internal ──
+    _token: params.get('token') || '',
     _charts: {},
     _sse: null,
     _startTime: Date.now(),
@@ -1394,6 +1634,11 @@ function dashboard() {
       this._connectSSE();
       this._loadSettings();
       this._setupKeyboard();
+      this.refreshCameraState();
+      this.loadCameraInfo();
+      this.loadPresets();
+      var self = this;
+      setInterval(function () { self.refreshCameraState(); }, 5000);
       setInterval(function () { self._updateUptime(); }, 1000);
       // Record transport timeline
       setInterval(function () { self._recordTimeline(); }, 2000);
@@ -1442,7 +1687,7 @@ function dashboard() {
           case 'H':
             e.preventDefault();
             self.page = 'home';
-            self._toast('Dashboard', 'info', 1500);
+            self._toast('Overview', 'info', 1500);
             break;
 
           case 's':
@@ -1464,6 +1709,23 @@ function dashboard() {
             e.preventDefault();
             self.page = 'setup';
             self._toast('Setup', 'info', 1500);
+            break;
+
+          case 'c':
+          case 'C':
+            e.preventDefault();
+            self.page = 'camera';
+            self.refreshCameraState();
+            self.loadPresets();
+            self._toast('Camera Control', 'info', 1500);
+            break;
+
+          case 'm':
+          case 'M':
+            e.preventDefault();
+            self.page = 'media';
+            if (!self.mediaFiles.length) self.loadMediaList();
+            self._toast('Media Browser', 'info', 1500);
             break;
 
           // ── Camera action shortcuts ──
@@ -1567,6 +1829,186 @@ function dashboard() {
           }
         })
         .catch(function (e) { self._toast('Request failed: ' + (e.message || 'network error'), 'error'); });
+    },
+
+    // ── Camera Control methods ──
+    toggleRecord() {
+      var self = this;
+      var url = self.camState.encoding ? '/api/camera/shutter/stop' : '/api/camera/shutter/start';
+      apiPost(url).then(function (res) { return res.json(); }).then(function (d) {
+        if (d.ok) self._toast(d.recording ? 'Recording started' : 'Recording stopped', d.recording ? 'info' : 'success');
+        setTimeout(function () { self.refreshCameraState(); }, 1500);
+      }).catch(function () { self._toast('Failed to toggle recording', 'error'); });
+    },
+    loadPresetGroup(id) {
+      var self = this;
+      apiPost('/api/camera/preset-group', { id: id }).then(function (res) { return res.json(); }).then(function (d) {
+        if (d.ok) { self.activeGroup = id; self._toast('Switched to ' + self.groupName(id), 'success'); }
+        setTimeout(function () { self.refreshCameraState(); }, 1000);
+      }).catch(function (e) { self._toast('Mode switch failed', 'error'); });
+    },
+    loadPreset(id) {
+      var self = this;
+      apiPost('/api/camera/preset', { id: id }).then(function (res) { return res.json(); }).then(function (d) {
+        if (d.ok) self._toast('Preset loaded', 'success');
+        setTimeout(function () { self.refreshCameraState(); }, 500);
+      }).catch(function () {});
+    },
+    refreshCameraState() {
+      var self = this;
+      apiGet('/api/camera/state').then(function (d) {
+        if (!d || !d.ok) return;
+        var s = d.status || {};
+        self.camState.encoding = s.encoding === true;
+        self.camState.battery = s.battery !== undefined ? s.battery : -1;
+        self.camState.remainingPhotos = s.remaining_photos || 0;
+        self.camState.remainingVideoTime = s.remaining_video_sec || 0;
+        self.camState.videoDuration = s.video_duration || 0;
+        self.camState.mode = self.groupName(s.current_preset_group);
+        self.activeGroup = s.current_preset_group || 0;
+        var spaceKb = s.remaining_space_kb || 0;
+        self.camState.remainingSpaceGb = spaceKb > 0 ? (spaceKb / 1048576).toFixed(1) + ' GB' : '--';
+        self.camState.connected = true;
+        self.diagWifiSsid = s.wifi_ssid || '';
+        self.diagRawSettings = d.settings || {};
+      }).catch(function () { self.camState.connected = false; });
+    },
+    loadPresets() {
+      var self = this;
+      apiGet('/api/camera/presets').then(function (d) {
+        if (d && d.ok) self.presetGroups = d.groups || [];
+      }).catch(function () {});
+    },
+    loadCameraInfo() {
+      var self = this;
+      apiGet('/api/camera/info').then(function (d) {
+        if (d && d.ok) self.cameraInfo = d.info || {};
+      }).catch(function () {});
+    },
+    groupName(id) {
+      var names = { 1000: 'Video', 1001: 'Photo', 1002: 'Timelapse' };
+      return names[id] || ('Group ' + id);
+    },
+    setZoom() {
+      apiPost('/api/camera/zoom', { percent: parseInt(this.zoomPercent) });
+    },
+    rebootCamera() {
+      var self = this;
+      apiPost('/api/camera/reboot').then(function () { self._toast('Camera rebooting...', 'info'); });
+    },
+    sleepCamera() {
+      var self = this;
+      apiPost('/api/camera/sleep').then(function (res) { return res.json(); }).then(function () {
+        self._toast('Camera going to sleep...', 'info');
+        self.camState.connected = false;
+      });
+    },
+    wakeCamera() {
+      var self = this;
+      self._toast('Waking camera via Bluetooth...', 'info');
+      apiPost('/api/ble/wake').then(function (res) { return res.json(); }).then(function (d) {
+        if (d.ok) {
+          self._toast('Camera waking up! Refreshing in 5s...', 'success');
+          setTimeout(function () { self.refreshCameraState(); self.loadCameraInfo(); }, 5000);
+        } else {
+          self._toast(d.error || 'Wake failed', 'error');
+        }
+      }).catch(function () { self._toast('BLE wake failed', 'error'); });
+    },
+    formatDuration(s) {
+      if (!s || s < 0) return '--';
+      var h = Math.floor(s / 3600);
+      var m = Math.floor((s % 3600) / 60);
+      var sec = s % 60;
+      if (h > 0) return h + ':' + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+      return m + ':' + String(sec).padStart(2, '0');
+    },
+    // Webcam preview
+    startWebcam() {
+      var self = this;
+      apiPost('/api/camera/webcam/start').then(function (res) { return res.json(); }).then(function (d) {
+        if (d.ok) { self.camState.webcamActive = true; self._toast('Webcam stream started', 'success'); }
+      }).catch(function () { self._toast('Failed to start webcam', 'error'); });
+    },
+    stopWebcam() {
+      var self = this;
+      apiPost('/api/camera/webcam/stop').then(function (res) { return res.json(); }).then(function (d) {
+        if (d.ok) { self.camState.webcamActive = false; self._toast('Webcam stopped', 'info'); }
+      }).catch(function () {});
+    },
+
+    // ── Connection methods ──
+    connectManualCohn() {
+      var self = this;
+      if (!self.manualCohnIp || !self.manualCohnPass) {
+        self._toast('IP and password are required', 'error');
+        return;
+      }
+      apiPost('/api/cohn/credentials', {
+        ip: self.manualCohnIp,
+        username: self.manualCohnUser || 'gopro',
+        password: self.manualCohnPass,
+      }).then(function(res) { return res.json(); }).then(function(d) {
+        if (d.ok) {
+          self._toast('Connected! Fetching camera info...', 'success');
+          setTimeout(function() {
+            self.refreshCameraState();
+            self.loadCameraInfo();
+            self.loadPresets();
+          }, 1000);
+        } else {
+          self._toast(d.error || 'Connection failed', 'error');
+        }
+      }).catch(function() { self._toast('Failed to set credentials', 'error'); });
+    },
+    bleAutoConnect() {
+      var self = this;
+      self.bleConnecting = true;
+      self.bleStatus = 'Scanning for GoPro via Bluetooth...';
+      apiPost('/api/ble/auto-connect').then(function(res) { return res.json(); }).then(function(d) {
+        self.bleConnecting = false;
+        if (d.ok) {
+          self.bleStatus = 'Connected! Camera at ' + (d.ip || 'unknown');
+          self._toast('Camera connected via BLE!', 'success');
+          setTimeout(function() {
+            self.refreshCameraState();
+            self.loadCameraInfo();
+            self.loadPresets();
+          }, 1000);
+        } else {
+          self.bleStatus = d.error || 'Failed to connect';
+          self._toast(d.error || 'BLE connection failed', 'error');
+        }
+      }).catch(function(e) {
+        self.bleConnecting = false;
+        self.bleStatus = 'Error: ' + (e.message || 'network error');
+        self._toast('BLE auto-connect failed', 'error');
+      });
+    },
+
+    // ── Media Browser methods ──
+    loadMediaList() {
+      var self = this;
+      apiGet('/api/media/list').then(function (d) {
+        if (d && d.ok) self.mediaFiles = d.files || [];
+      }).catch(function () { self._toast('Failed to load media', 'error'); });
+    },
+    deleteMedia(path) {
+      var self = this;
+      if (!path || !confirm('Delete ' + path + '?')) return;
+      fetch('/api/media/file?token=' + encodeURIComponent(self._token), {
+        method: 'DELETE', headers: apiHeaders(), body: JSON.stringify({ path: path })
+      }).then(function () {
+        self.mediaFiles = self.mediaFiles.filter(function (f) { return f.path !== path; });
+        self._toast('File deleted', 'success');
+      }).catch(function () { self._toast('Delete failed', 'error'); });
+    },
+    formatFileSize(bytes) {
+      if (!bytes) return '0 B';
+      var units = ['B', 'KB', 'MB', 'GB'];
+      var i = 0;
+      while (bytes >= 1024 && i < 3) { bytes /= 1024; i++; }
+      return bytes.toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
     },
 
     // ── SSE with exponential backoff reconnection ──

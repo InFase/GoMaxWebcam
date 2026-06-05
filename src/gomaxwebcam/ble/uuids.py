@@ -44,11 +44,15 @@ QUERY_RESPONSE_UUID = "b5f90077-aa8d-11e3-9046-0002a5d5c51b"
 # Network Management characteristics (for WiFi + COHN provisioning)
 # ---------------------------------------------------------------------------
 
+# Network Management service UUID (b5f90090) contains two characteristics:
+#   b5f90091 [write]  — request characteristic
+#   b5f90092 [notify] — response characteristic
+
 # Write network management requests (WiFi SSID, password, COHN config)
-NETWORK_MGMT_REQUEST_UUID = "b5f90090-aa8d-11e3-9046-0002a5d5c51b"
+NETWORK_MGMT_REQUEST_UUID = "b5f90091-aa8d-11e3-9046-0002a5d5c51b"
 
 # Read network management responses (Notify)
-NETWORK_MGMT_RESPONSE_UUID = "b5f90091-aa8d-11e3-9046-0002a5d5c51b"
+NETWORK_MGMT_RESPONSE_UUID = "b5f90092-aa8d-11e3-9046-0002a5d5c51b"
 
 # ---------------------------------------------------------------------------
 # Camera info (read-only)
@@ -61,25 +65,37 @@ WIFI_AP_SSID_UUID = "b5f90002-aa8d-11e3-9046-0002a5d5c51b"
 WIFI_AP_PASSWORD_UUID = "b5f90003-aa8d-11e3-9046-0002a5d5c51b"
 
 # ---------------------------------------------------------------------------
-# Protobuf command IDs for COHN provisioning (feature IDs in request TLVs)
+# BLE Feature IDs (first byte of protobuf-wrapped BLE commands)
 # ---------------------------------------------------------------------------
 
-# These are the protobuf feature IDs used in the network management
-# request/response protocol for COHN provisioning.
-COHN_FEATURE_ID = 0xF5  # COHN-related commands
+FEATURE_ID_COMMAND = 0xF1  # Write to Command characteristic (b5f90072)
+FEATURE_ID_QUERY = 0xF5   # Write to Query characteristic (b5f90076)
 
-# COHN request action IDs (sub-commands within the COHN feature)
-COHN_GET_STATUS = 0x01
-COHN_SET_SETTING = 0x02
-COHN_CREATE_CERT = 0x03
-COHN_CLEAR_CERT = 0x04
-COHN_GET_CERT = 0x05
+# ---------------------------------------------------------------------------
+# COHN Action IDs (from open_gopro.models.constants.ActionId)
+# ---------------------------------------------------------------------------
 
-# WiFi scan/connect action IDs (used for station-mode WiFi provisioning)
-WIFI_SCAN_START = 0x02
-WIFI_SCAN_RESULTS = 0x03
-WIFI_CONNECT = 0x04
-WIFI_GET_STATUS = 0x05
+COHN_CREATE_CERT = 0x67       # RequestCreateCOHNCert → Command char
+COHN_CLEAR_CERT = 0x68        # RequestClearCOHNCert → Command char
+COHN_GET_CERT = 0x69          # RequestCOHNCert → Command char
+COHN_GET_STATUS = 0x6F        # RequestGetCOHNStatus → Query char
+COHN_SET_SETTING = 0x70       # RequestCOHNSetting → Command char
+
+# Response action IDs (in notification responses)
+COHN_GET_STATUS_RESPONSE = 0xEF
+
+# ---------------------------------------------------------------------------
+# Network Management Feature + Action IDs (Network Mgmt characteristic)
+# ---------------------------------------------------------------------------
+
+FEATURE_ID_NETWORK_MGMT = 0x02
+
+WIFI_SCAN_START = 0x02         # RequestStartScan → scan response + notification
+WIFI_SCAN_RESULTS = 0x03       # RequestGetApEntries → list of WiFi networks
+WIFI_CONNECT = 0x04            # RequestConnect → connect to provisioned AP
+WIFI_CONNECT_NEW = 0x05        # RequestConnectNew → provision + connect new AP
+WIFI_NOTIF_SCAN = 0x0B         # NotifStartScanning (notification)
+WIFI_NOTIF_PROVIS = 0x0C       # NotifProvisioningState (notification)
 
 # ---------------------------------------------------------------------------
 # BLE advertisement filter constants

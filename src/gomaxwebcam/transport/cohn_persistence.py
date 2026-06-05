@@ -254,7 +254,7 @@ class CohnCredentialStore:
 
                 # Use the cohn_db's insert method
                 # open-gopro's CohnDb stores by camera serial
-                cohn_db.insert_credentials(
+                cohn_db.insert_or_update_credentials(
                     credentials.camera_serial, cohn_info,
                 )
 

@@ -252,10 +252,18 @@ def main() -> None:
         keepalive_interval=cfg.advanced.keepalive_interval,
         max_consecutive_failures=cfg.advanced.max_consecutive_failures,
     ))
+    # Load COHN credentials from persistence store (populated by BLE provisioning)
+    from gomaxwebcam.transport.cohn_persistence import CohnCredentialStore
+    _cohn_store = CohnCredentialStore()
+    _cohn_serial = cfg.camera.camera_serial or "7212"
+    _cohn_creds = _cohn_store.load_credentials(_cohn_serial[-4:] if len(_cohn_serial) > 4 else _cohn_serial)
+
     transport_manager.register_transport("COHN", COHNTransport(
-        # last_known_ip populated from a previous session if available;
-        # None lets the COHN transport fall back to mDNS discovery.
-        ip_address=cfg.camera.last_known_ip or None,
+        ip_address=(_cohn_creds.ip_address if _cohn_creds else None) or cfg.camera.last_known_ip or None,
+        username=_cohn_creds.username if _cohn_creds else "",
+        password=_cohn_creds.password if _cohn_creds else "",
+        certificate=_cohn_creds.certificate if _cohn_creds else "",
+        cohn_db=_cohn_store.db_path,
         udp_port=cfg.advanced.udp_port,
         resolution=_res,
         fov=_fov,
@@ -390,8 +398,6 @@ def main() -> None:
         signal.signal(signal.SIGBREAK, _signal_handler)
 
     # Fallback: atexit handler ensures cleanup even if signals are missed
-    import atexit
-
     def _atexit_cleanup() -> None:
         if not shutdown_event.is_set():
             log.info("atexit cleanup — forcing shutdown")

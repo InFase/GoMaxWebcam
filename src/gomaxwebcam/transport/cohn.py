@@ -546,6 +546,10 @@ class COHNTransport(Transport):
     # ------------------------------------------------------------------
 
     @property
+    def gopro_handle(self) -> Any:
+        return self._gopro
+
+    @property
     def ip_address(self) -> str | None:
         return self._ip_address
 

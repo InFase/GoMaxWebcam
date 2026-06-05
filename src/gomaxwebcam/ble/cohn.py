@@ -29,9 +29,9 @@ from typing import Any, Optional
 
 from gomaxwebcam.ble.gatt_client import GoProBLEClient
 from gomaxwebcam.ble.uuids import (
-    NETWORK_MGMT_REQUEST_UUID,
-    NETWORK_MGMT_RESPONSE_UUID,
-    COHN_FEATURE_ID,
+    FEATURE_ID_COMMAND,
+    FEATURE_ID_QUERY,
+    FEATURE_ID_NETWORK_MGMT,
     COHN_GET_STATUS,
     COHN_SET_SETTING,
     COHN_CREATE_CERT,
@@ -40,7 +40,7 @@ from gomaxwebcam.ble.uuids import (
     WIFI_SCAN_START,
     WIFI_SCAN_RESULTS,
     WIFI_CONNECT,
-    WIFI_GET_STATUS,
+    WIFI_CONNECT_NEW,
 )
 
 log = logging.getLogger("gomaxwebcam.ble.cohn")
@@ -157,7 +157,8 @@ class COHNProvisioner:
     async def scan_wifi(self, timeout: float = 15.0) -> list[WiFiNetwork]:
         """Ask the camera to scan for WiFi networks.
 
-        The camera performs the scan and returns results over BLE.
+        Sends RequestStartScan, waits for the scan to complete,
+        then fetches results via RequestGetApEntries.
 
         Returns:
             List of WiFiNetwork instances found by the camera.
@@ -170,16 +171,16 @@ class COHNProvisioner:
             request = self._encode_wifi_scan_request()
             response = await self._ble.write_network_management(request)
 
-            if response is None:
-                log.error("No response to WiFi scan request")
-                self._set_state(COHNState.ERROR)
-                return []
+            if response is not None:
+                log.debug("WiFi scan start response: %s", response.hex())
+            else:
+                log.warning("No response to WiFi scan start (may still work via notification)")
 
-            # Wait a moment for the scan to complete on the camera
-            await asyncio.sleep(2.0)
+            # Wait for the camera to complete its scan
+            await asyncio.sleep(5.0)
 
-            # Request scan results
-            results_request = self._encode_wifi_scan_results_request()
+            # Request scan results (scan_id=0 to get latest)
+            results_request = self._encode_wifi_scan_results_request(scan_id=0)
             results_response = await self._ble.write_network_management(results_request)
 
             if results_response is None:
@@ -187,6 +188,7 @@ class COHNProvisioner:
                 self._set_state(COHNState.ERROR)
                 return []
 
+            log.debug("WiFi scan results raw: %s", results_response.hex())
             networks = self._decode_wifi_scan_results(results_response)
             log.info("Camera found %d WiFi networks", len(networks))
 
@@ -261,19 +263,25 @@ class COHNProvisioner:
     async def get_status(self) -> COHNCredentials:
         """Query current COHN status from the camera.
 
-        Useful for checking if COHN is already provisioned.
+        COHN status is queried via the Query characteristic (b5f90076),
+        not the Network Management characteristic. Uses Feature ID 0xF5
+        and Action ID 0x6F (RequestGetCOHNStatus).
+
         Returns COHNCredentials with whatever info the camera reports.
         """
         log.info("Querying COHN status from camera")
 
         try:
-            request = self._encode_cohn_command(COHN_GET_STATUS)
-            response = await self._ble.write_network_management(request)
+            # [FeatureID=0xF5, ActionID=0x6F, protobuf: field1=1 (register)]
+            payload = self._encode_varint_field(1, 1)  # register_cohn_status=True
+            request = bytes([FEATURE_ID_QUERY, COHN_GET_STATUS]) + payload
+            response = await self._ble.write_query(request)
 
             if response is None:
                 log.warning("No response to COHN status query")
                 return self._credentials
 
+            log.debug("COHN status raw response: %s", response.hex())
             self._decode_cohn_status(response)
             return self._credentials
 
@@ -282,15 +290,12 @@ class COHNProvisioner:
             return self._credentials
 
     async def clear_certificate(self) -> bool:
-        """Clear the COHN TLS certificate on the camera.
-
-        Use this before re-provisioning if the existing cert is invalid.
-        """
+        """Clear the COHN TLS certificate on the camera."""
         log.info("Clearing COHN certificate on camera")
 
         try:
-            request = self._encode_cohn_command(COHN_CLEAR_CERT)
-            response = await self._ble.write_network_management(request)
+            request = bytes([FEATURE_ID_COMMAND, COHN_CLEAR_CERT])
+            response = await self._ble.write_command(request)
             if response is not None:
                 log.info("COHN certificate cleared")
                 return True
@@ -345,22 +350,25 @@ class COHNProvisioner:
             return False
 
     async def _poll_wifi_status(self, timeout: float) -> bool:
-        """Poll the camera's WiFi status until connected or timeout."""
+        """Poll the camera's WiFi/COHN status until connected or timeout.
+
+        After WiFi connect, we poll COHN status via the Query characteristic
+        to detect when the camera has obtained an IP address.
+        """
         import time
 
         deadline = time.monotonic() + timeout
-        poll_interval = 2.0
+        poll_interval = 3.0
 
         while time.monotonic() < deadline:
             try:
-                request = self._encode_wifi_status_request()
-                response = await self._ble.write_network_management(request)
+                payload = self._encode_varint_field(1, 0)
+                request = bytes([FEATURE_ID_QUERY, COHN_GET_STATUS]) + payload
+                response = await self._ble.write_query(request)
 
                 if response is not None:
-                    connected, ip = self._decode_wifi_status(response)
-                    if connected:
-                        if ip:
-                            self._credentials.ip_address = ip
+                    self._decode_cohn_status(response)
+                    if self._credentials.ip_address:
                         return True
 
             except Exception as e:
@@ -380,8 +388,10 @@ class COHNProvisioner:
         log.info("Creating COHN TLS certificate")
 
         try:
-            request = self._encode_cohn_command(COHN_CREATE_CERT)
-            response = await self._ble.write_network_management(request)
+            # [FeatureID=0xF1, ActionID=0x67, protobuf: field1=1 (override)]
+            payload = self._encode_varint_field(1, 1)  # override=True
+            request = bytes([FEATURE_ID_COMMAND, COHN_CREATE_CERT]) + payload
+            response = await self._ble.write_command(request)
 
             if response is None:
                 log.error("No response to certificate creation request")
@@ -409,8 +419,9 @@ class COHNProvisioner:
         log.info("Querying COHN status")
 
         try:
-            request = self._encode_cohn_command(COHN_GET_STATUS)
-            response = await self._ble.write_network_management(request)
+            payload = self._encode_varint_field(1, 1)  # register_cohn_status=True
+            request = bytes([FEATURE_ID_QUERY, COHN_GET_STATUS]) + payload
+            response = await self._ble.write_query(request)
 
             if response is None:
                 log.warning("No COHN status response")
@@ -472,23 +483,27 @@ class COHNProvisioner:
             + COHNProvisioner._encode_varint(value)
         )
 
-    def _encode_cohn_command(self, action_id: int) -> bytes:
-        """Encode a COHN command request.
-
-        Format: [feature_id, action_id]
-        """
-        return bytes([COHN_FEATURE_ID, action_id])
-
     def _encode_wifi_scan_request(self) -> bytes:
-        """Encode a WiFi scan start request."""
-        return bytes([COHN_FEATURE_ID, WIFI_SCAN_START])
+        """Encode a WiFi scan start request (RequestStartScan — empty proto)."""
+        return bytes([FEATURE_ID_NETWORK_MGMT, WIFI_SCAN_START])
 
-    def _encode_wifi_scan_results_request(self) -> bytes:
-        """Encode a WiFi scan results request."""
-        return bytes([COHN_FEATURE_ID, WIFI_SCAN_RESULTS])
+    def _encode_wifi_scan_results_request(self, scan_id: int = 0) -> bytes:
+        """Encode a WiFi scan results request (RequestGetApEntries).
+
+        Protobuf fields:
+          field 1 (varint): start_index (0)
+          field 2 (varint): max_entries (0 = all)
+          field 3 (varint): scan_id
+        """
+        payload = (
+            self._encode_varint_field(1, 0)          # start_index
+            + self._encode_varint_field(2, 0)         # max_entries (all)
+            + self._encode_varint_field(3, scan_id)   # scan_id
+        )
+        return bytes([FEATURE_ID_NETWORK_MGMT, WIFI_SCAN_RESULTS]) + payload
 
     def _encode_wifi_connect_request(self, ssid: str, password: str) -> bytes:
-        """Encode a WiFi connect request with SSID and password.
+        """Encode a WiFi connect request (RequestConnectNew).
 
         Protobuf fields:
           field 1 (string): SSID
@@ -498,11 +513,7 @@ class COHNProvisioner:
             self._encode_length_delimited(1, ssid.encode("utf-8"))
             + self._encode_length_delimited(2, password.encode("utf-8"))
         )
-        return bytes([COHN_FEATURE_ID, WIFI_CONNECT]) + payload
-
-    def _encode_wifi_status_request(self) -> bytes:
-        """Encode a WiFi status query request."""
-        return bytes([COHN_FEATURE_ID, WIFI_GET_STATUS])
+        return bytes([FEATURE_ID_NETWORK_MGMT, WIFI_CONNECT_NEW]) + payload
 
     # ------------------------------------------------------------------
     # Protobuf decoding helpers
@@ -638,32 +649,48 @@ class COHNProvisioner:
         return ""
 
     def _decode_cohn_status(self, response: bytes) -> None:
-        """Decode COHN status response and update credentials."""
+        """Decode COHN status response and update credentials.
+
+        Response format: [action_id(0xEF), protobuf_fields...]
+        The first byte is the response action ID, then protobuf fields follow.
+        """
         if len(response) < 2:
             return
 
-        offset = 2  # Skip header
+        offset = 1  # Skip action_id byte only
+        # NotifyCOHNStatus protobuf fields:
+        #   1: status (EnumCOHNStatus: 0=UNPROVISIONED, 1=PROVISIONED)
+        #   2: state (EnumCOHNNetworkState)
+        #   3: username (string)
+        #   4: password (string)
+        #   5: ipaddress (string)
+        #   6: enabled (bool)
+        #   7: ssid (string)
+        #   8: macaddress (string)
         while offset < len(response):
             try:
                 fn, wt, value, offset = self._decode_field(response, offset)
                 if fn == 1 and isinstance(value, int):
-                    # COHN enabled: 1 = yes
                     self._credentials.provisioned = value == 1
-                elif fn == 2 and isinstance(value, bytes):
-                    # IP address
-                    self._credentials.ip_address = value.decode("utf-8", errors="replace")
+                    log.debug("COHN status: %s", "PROVISIONED" if value == 1 else "UNPROVISIONED")
+                elif fn == 2 and isinstance(value, int):
+                    log.debug("COHN network state: %d", value)
                 elif fn == 3 and isinstance(value, bytes):
-                    # Username
                     self._credentials.username = value.decode("utf-8", errors="replace")
+                    log.debug("COHN username: %s", self._credentials.username)
                 elif fn == 4 and isinstance(value, bytes):
-                    # Password
                     self._credentials.password = value.decode("utf-8", errors="replace")
+                    log.debug("COHN password: %s", self._credentials.password)
                 elif fn == 5 and isinstance(value, bytes):
-                    # SSID the camera is connected to
+                    self._credentials.ip_address = value.decode("utf-8", errors="replace")
+                    log.debug("COHN IP: %s", self._credentials.ip_address)
+                elif fn == 6 and isinstance(value, int):
+                    log.debug("COHN enabled: %s", bool(value))
+                elif fn == 7 and isinstance(value, bytes):
                     self._credentials.ssid = value.decode("utf-8", errors="replace")
-                elif fn == 6 and isinstance(value, bytes):
-                    # Certificate
-                    self._credentials.certificate = value.decode("utf-8", errors="replace")
+                    log.debug("COHN SSID: %s", self._credentials.ssid)
+                elif fn == 8 and isinstance(value, bytes):
+                    log.debug("COHN MAC: %s", value.decode("utf-8", errors="replace"))
             except Exception:
                 break
 
