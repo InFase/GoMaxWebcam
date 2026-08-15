@@ -1062,6 +1062,48 @@ def create_app(
     async def preview_stop(request: Request, _auth: None = Depends(verify_token)) -> JSONResponse:
         return await _camera_call(request, "preview_stop")
 
+    # -- Live preview snapshot (the actual virtual-camera output) --
+
+    @app.get("/api/preview/frame.jpg")
+    async def preview_frame(request: Request, _auth: None = Depends(verify_token)):
+        """Return the latest decoded webcam frame as a JPEG.
+
+        This is the exact image GoMaxWebcam is sending to the virtual camera
+        (i.e. what Zoom/Teams/OBS see), so the dashboard's Live Preview shows
+        the real feed rather than a separate GoPro preview stream. Returns 503
+        when no frame is available yet (pipeline not streaming).
+        """
+        from fastapi.responses import Response
+
+        orch = getattr(request.app.state, "orchestrator", None)
+        pipeline = getattr(orch, "pipeline", None) if orch else None
+        sink = getattr(pipeline, "vcam_sink", None) if pipeline else None
+        frame = getattr(sink, "last_frame", None) if sink else None
+        if frame is None:
+            return JSONResponse(
+                status_code=503,
+                content={"ok": False, "error": "No live frame yet"},
+            )
+
+        try:
+            jpeg = await asyncio.to_thread(_encode_frame_jpeg, frame)
+        except Exception as exc:  # pragma: no cover - encoder edge cases
+            log.debug("Preview JPEG encode failed: %s", exc)
+            return JSONResponse(
+                status_code=500,
+                content={"ok": False, "error": "Could not encode frame"},
+            )
+        if jpeg is None:
+            return JSONResponse(
+                status_code=500,
+                content={"ok": False, "error": "No JPEG encoder available"},
+            )
+        return Response(
+            content=jpeg,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "no-store"},
+        )
+
     # -- Health (no auth required) --
 
     @app.get("/health")
@@ -1118,3 +1160,25 @@ def _status_to_dict(status: CameraStatus) -> dict:
     """Convert CameraStatus to a JSON-serializable dict."""
     from dataclasses import asdict
     return asdict(status)
+
+
+def _encode_frame_jpeg(frame, quality: int = 70) -> Optional[bytes]:
+    """Encode a BGR24 numpy frame to JPEG bytes for the live preview.
+
+    The virtual-camera sink stores frames in BGR24 (OpenCV/Unity Capture
+    order). We convert to RGB and JPEG-encode with Pillow (already present
+    via pystray). Returns None if no encoder is available so the caller can
+    return a clean error instead of crashing.
+    """
+    try:
+        from PIL import Image
+    except Exception:
+        return None
+
+    # BGR24 → RGB by reversing the last axis; .copy() makes it contiguous.
+    rgb = frame[:, :, ::-1].copy()
+    img = Image.fromarray(rgb, mode="RGB")
+    import io
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=quality)
+    return buf.getvalue()

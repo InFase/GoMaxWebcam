@@ -599,17 +599,17 @@ kbd.wide { padding: 2px 14px; }
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2"/><circle cx="8" cy="14" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
       <span>Media</span>
     </a>
+    <a :class="{ active: page === 'setup' }" @click="page = 'setup'">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 16.1A5 5 0 015.9 20M2 12.05A9 9 0 019.95 20M2 8V6a2 2 0 012-2h16a2 2 0 012 2v12a2 2 0 01-2 2h-6"/><line x1="2" y1="20" x2="2.01" y2="20"/></svg>
+      <span>Connect</span>
+    </a>
     <a :class="{ active: page === 'settings' }" @click="page = 'settings'">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
       <span>Settings</span>
     </a>
     <a :class="{ active: page === 'diagnostics' }" @click="page = 'diagnostics'">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
-      <span>Diagnostics</span>
-    </a>
-    <a :class="{ active: page === 'setup' }" @click="page = 'setup'">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-      <span>Setup</span>
+      <span>Advanced</span>
     </a>
   </nav>
   <div class="sidebar-footer">
@@ -637,6 +637,24 @@ kbd.wide { padding: 2px 14px; }
   <!-- ══════════════ HOME / OVERVIEW PAGE ══════════════ -->
   <div class="page" :class="{ active: page === 'home' }">
     <div class="page-header"><h2>Overview</h2></div>
+
+    <!-- Big plain-English status banner -->
+    <div class="card" :style="'border-color:' + (status.state==='streaming' ? 'var(--gp-green)' : status.state==='error' ? 'var(--gp-red)' : 'var(--gp-border)')">
+      <div class="hero-status" style="margin:0;padding:4px 0;">
+        <span class="big-dot" :class="status.state"></span>
+        <div style="flex:1;">
+          <div class="hero-label" x-text="status.state_label || 'Waiting for GoPro…'"></div>
+          <div style="color:var(--gp-muted);font-size:0.88rem;margin-top:4px;" x-text="status.hint || ''"></div>
+        </div>
+        <button class="btn primary" @click="openPreview()" x-show="status.state==='streaming'" style="white-space:nowrap;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          See Live View
+        </button>
+        <button class="btn primary" @click="page='setup'" x-show="!camState.connected" style="white-space:nowrap;">
+          Connect a Camera
+        </button>
+      </div>
+    </div>
 
     <!-- Camera Info -->
     <div class="card">
@@ -672,9 +690,10 @@ kbd.wide { padding: 2px 14px; }
     <div class="card">
       <div class="card-title">Quick Actions</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn" @click="page='camera'" style="background:var(--gp-accent);color:white;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:600;">Camera Control</button>
-        <button class="btn" @click="page='media'; if(!mediaFiles.length) loadMediaList();" style="background:var(--gp-surface);border:1px solid var(--gp-border);color:var(--gp-text);padding:10px 20px;border-radius:8px;cursor:pointer;">Browse Media</button>
-        <button class="btn" @click="page='settings'" style="background:var(--gp-surface);border:1px solid var(--gp-border);color:var(--gp-text);padding:10px 20px;border-radius:8px;cursor:pointer;">Settings</button>
+        <button class="btn primary" @click="openPreview()" :disabled="status.state!=='streaming'" title="Watch the live feed your apps are receiving">See Live View</button>
+        <button class="btn" @click="page='camera'; refreshCameraState(); loadPresets();">Control Camera</button>
+        <button class="btn" @click="page='media'; if(!mediaFiles.length) loadMediaList();">Browse Photos &amp; Videos</button>
+        <button class="btn" @click="page='setup'">Connect a Camera</button>
       </div>
     </div>
   </div>
@@ -756,7 +775,10 @@ kbd.wide { padding: 2px 14px; }
           <li :class="{ active: t === status.transport }">
             <span style="display:flex;align-items:center;">
               <span class="handle">&#x2630;</span>
-              <span class="t-name" x-text="t"></span>
+              <span>
+                <span class="t-name" x-text="transportLabel(t)"></span>
+                <span style="display:block;font-size:0.72rem;color:var(--gp-muted);" x-text="transportDesc(t)"></span>
+              </span>
             </span>
             <span class="t-actions">
               <button class="btn btn-sm" :disabled="i === 0" @click="moveTransport(i, -1)" title="Move up (higher priority)">&uarr;</button>
@@ -776,17 +798,17 @@ kbd.wide { padding: 2px 14px; }
           <span class="tip-text">Force an immediate switch to a specific connection method right now, bypassing the automatic priority order. Useful for testing or if auto-detection picks the wrong transport.</span>
         </span>
       </div>
-      <p style="font-size:0.8rem;color:var(--gp-muted);margin:0 0 12px;">Force-connect via a specific transport. Highlighted button = currently active.</p>
+      <p style="font-size:0.8rem;color:var(--gp-muted);margin:0 0 12px;">Force a specific connection method right now. Highlighted button = currently active.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn" @click="switchTransport('usb')"
                 :class="{ primary: status.transport === 'USB' }"
-                title="Switch to USB — direct cable connection">USB</button>
+                title="USB — direct cable connection">USB Cable</button>
         <button class="btn" @click="switchTransport('cohn')"
                 :class="{ primary: status.transport === 'COHN' }"
-                title="Switch to COHN — stream over home Wi-Fi (requires setup)">COHN</button>
+                title="COHN — stream over home Wi‑Fi (requires setup)">Home Wi‑Fi</button>
         <button class="btn" @click="switchTransport('wifi_ap')"
                 :class="{ primary: status.transport === 'WiFi AP' }"
-                title="Switch to WiFi AP — connect via camera's own hotspot">WiFi AP</button>
+                title="WiFi AP — connect via camera's own hotspot">Camera Hotspot</button>
       </div>
     </div>
 
@@ -844,10 +866,10 @@ kbd.wide { padding: 2px 14px; }
     </div>
   </div>
 
-  <!-- ══════════════ DIAGNOSTICS PAGE ══════════════ -->
+  <!-- ══════════════ ADVANCED / DIAGNOSTICS PAGE ══════════════ -->
   <div class="page" :class="{ active: page === 'diagnostics' }">
     <div class="page-header">
-      <h2>Diagnostics</h2>
+      <h2>Advanced &amp; Diagnostics</h2>
       <button class="btn" @click="exportDiagnostics()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
         Export
@@ -876,7 +898,7 @@ kbd.wide { padding: 2px 14px; }
             <span x-text="camState.connected ? 'Connected' : 'Disconnected'"></span>
           </div>
         </div>
-        <div class="stat-item"><div class="stat-label">Method</div><div class="stat-value">COHN (HTTPS)</div></div>
+        <div class="stat-item"><div class="stat-label">Connection Type</div><div class="stat-value" x-text="status.transport || '--'"></div></div>
         <div class="stat-item"><div class="stat-label">WiFi Network</div><div class="stat-value" x-text="camState.connected ? (diagWifiSsid || '--') : '--'"></div></div>
         <div class="stat-item"><div class="stat-label">App Uptime</div><div class="stat-value" x-text="uptime"></div></div>
       </div>
@@ -921,69 +943,81 @@ kbd.wide { padding: 2px 14px; }
     </div>
   </div>
 
-  <!-- ══════════════ SETUP PAGE (BLE Wizard) ══════════════ -->
+  <!-- ══════════════ CONNECT PAGE (camera setup) ══════════════ -->
   <div class="page" :class="{ active: page === 'setup' }">
     <div class="page-header">
-      <h2>COHN Setup</h2>
+      <h2>Connect Your GoPro</h2>
     </div>
 
+    <p style="font-size:0.9rem;color:var(--gp-muted);margin:0 0 18px;max-width:640px;">
+      The easiest way to use your GoPro is over a <strong>USB cable</strong> — just plug it in and
+      it connects automatically. To go <strong>wireless over your home Wi‑Fi</strong>, do the
+      one-time setup below. After that, GoMaxWebcam reconnects on its own.
+    </p>
+
+    <!-- Recommended: one-tap Bluetooth setup -->
+    <div class="card" style="border-color:var(--gp-green);">
+      <div class="card-title" style="color:var(--gp-green);">Recommended &middot; Wireless Setup</div>
+      <p style="font-size:0.88rem;color:var(--gp-muted);margin:0 0 12px;">
+        Sets up wireless streaming automatically using Bluetooth. Just make sure your
+        GoPro is <strong>turned on</strong> and <strong>Bluetooth is enabled</strong> on this PC, then click below.
+      </p>
+      <button @click="bleAutoConnect()" :disabled="bleConnecting"
+        style="padding:10px 22px;border-radius:8px;border:none;background:var(--gp-green);color:white;cursor:pointer;font-weight:600;">
+        <span x-text="bleConnecting ? 'Connecting…' : 'Set Up Wireless (Bluetooth)'"></span>
+      </button>
+      <div x-show="bleStatus" style="margin-top:10px;font-size:0.85rem;color:var(--gp-muted);" x-text="bleStatus"></div>
+    </div>
+
+    <!-- Step-by-step wizard (if you want your own Wi-Fi name/password) -->
     <div class="card">
-      <div class="card-title">Camera On Home Network (COHN)</div>
-      <p style="font-size:0.88rem;color:var(--gp-muted);margin:0 0 16px;">
-        Set up your GoPro for wireless streaming over your home WiFi network.
-        This enables COHN as a failover transport when USB is unavailable.
+      <div class="card-title">Guided Wi‑Fi Setup</div>
+      <p style="font-size:0.85rem;color:var(--gp-muted);margin:0 0 12px;">
+        Prefer to choose your camera and enter your home Wi‑Fi yourself? This step-by-step
+        wizard walks you through it.
       </p>
       <button class="btn primary" @click="wizardOpen()">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-        Start COHN Setup Wizard
+        Open Setup Wizard
       </button>
     </div>
 
-    <!-- Quick Connect (manual COHN credentials) -->
+    <!-- Advanced: manual credentials (collapsed by default) -->
     <div class="card">
-      <div class="card-title">Quick Connect (Manual)</div>
-      <p style="font-size:0.85rem;color:var(--gp-muted);margin:0 0 12px;">
-        Already have COHN credentials? Enter them here to connect directly.
-        You can find these in the GoPro Quik app under Connections &gt; Camera Info.
-      </p>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
-        <div style="flex:1;min-width:140px;">
-          <label style="font-size:0.75rem;color:var(--gp-muted);display:block;margin-bottom:4px;">Camera IP</label>
-          <input type="text" x-model="manualCohnIp" placeholder="192.168.1.x"
-            style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gp-border);background:var(--gp-surface);color:var(--gp-text);font-size:0.9rem;">
+      <div class="card-title" style="cursor:pointer;" @click="showManualConnect = !showManualConnect">
+        Advanced &middot; Enter Credentials Manually
+        <span style="float:right;color:var(--gp-muted);" x-text="showManualConnect ? '▲' : '▼'"></span>
+      </div>
+      <div x-show="showManualConnect">
+        <p style="font-size:0.85rem;color:var(--gp-muted);margin:0 0 12px;">
+          Already have your camera's Wi‑Fi connection details? Enter them here. You can find these
+          in the GoPro Quik app under Connections &gt; Camera Info. Most people won't need this.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+          <div style="flex:1;min-width:140px;">
+            <label style="font-size:0.75rem;color:var(--gp-muted);display:block;margin-bottom:4px;">Camera IP address</label>
+            <input type="text" x-model="manualCohnIp" placeholder="192.168.1.x"
+              style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gp-border);background:var(--gp-surface);color:var(--gp-text);font-size:0.9rem;">
+          </div>
+          <div style="flex:1;min-width:100px;">
+            <label style="font-size:0.75rem;color:var(--gp-muted);display:block;margin-bottom:4px;">Username</label>
+            <input type="text" x-model="manualCohnUser" placeholder="gopro"
+              style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gp-border);background:var(--gp-surface);color:var(--gp-text);font-size:0.9rem;">
+          </div>
+          <div style="flex:1;min-width:120px;">
+            <label style="font-size:0.75rem;color:var(--gp-muted);display:block;margin-bottom:4px;">Password</label>
+            <input type="text" x-model="manualCohnPass" placeholder="Camera password"
+              style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gp-border);background:var(--gp-surface);color:var(--gp-text);font-size:0.9rem;">
+          </div>
+          <button @click="connectManualCohn()"
+            style="padding:8px 20px;border-radius:6px;border:none;background:var(--gp-accent);color:white;cursor:pointer;font-weight:600;white-space:nowrap;">
+            Connect
+          </button>
         </div>
-        <div style="flex:1;min-width:100px;">
-          <label style="font-size:0.75rem;color:var(--gp-muted);display:block;margin-bottom:4px;">Username</label>
-          <input type="text" x-model="manualCohnUser" placeholder="gopro"
-            style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gp-border);background:var(--gp-surface);color:var(--gp-text);font-size:0.9rem;">
-        </div>
-        <div style="flex:1;min-width:120px;">
-          <label style="font-size:0.75rem;color:var(--gp-muted);display:block;margin-bottom:4px;">Password</label>
-          <input type="text" x-model="manualCohnPass" placeholder="COHN password"
-            style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--gp-border);background:var(--gp-surface);color:var(--gp-text);font-size:0.9rem;">
-        </div>
-        <button @click="connectManualCohn()"
-          style="padding:8px 20px;border-radius:6px;border:none;background:var(--gp-accent);color:white;cursor:pointer;font-weight:600;white-space:nowrap;">
-          Connect
-        </button>
       </div>
     </div>
 
-    <!-- BLE Auto-Connect -->
-    <div class="card">
-      <div class="card-title">Auto-Connect via Bluetooth</div>
-      <p style="font-size:0.85rem;color:var(--gp-muted);margin:0 0 12px;">
-        Scans for your GoPro via Bluetooth and retrieves COHN credentials automatically.
-        Make sure your GoPro is on and Bluetooth is enabled on your PC.
-      </p>
-      <button @click="bleAutoConnect()" :disabled="bleConnecting"
-        style="padding:8px 20px;border-radius:6px;border:none;background:var(--gp-green);color:white;cursor:pointer;font-weight:600;">
-        <span x-text="bleConnecting ? 'Connecting...' : 'Auto-Connect via BLE'"></span>
-      </button>
-      <div x-show="bleStatus" style="margin-top:8px;font-size:0.85rem;color:var(--gp-muted);" x-text="bleStatus"></div>
-    </div>
-
-    <!-- Current COHN Status -->
+    <!-- Current connection status -->
     <div class="card">
       <div class="card-title">Current Connection Status</div>
       <div class="stat-grid">
@@ -1178,11 +1212,24 @@ kbd.wide { padding: 2px 14px; }
 
 <!-- ══════════════ LIVE PREVIEW MODAL ══════════════ -->
 <template x-if="showPreview">
-  <div class="preview-modal" @click.self="showPreview = false">
-    <button class="preview-close" @click="showPreview = false">&times;</button>
-    <div style="text-align:center;color:var(--gp-muted);">
+  <div class="preview-modal" @click.self="closePreview()">
+    <button class="preview-close" @click="closePreview()">&times;</button>
+    <!-- Live frame: the actual image being sent to your webcam apps -->
+    <div x-show="!previewError" style="text-align:center;">
+      <img x-ref="previewImg" alt="Live webcam feed"
+        style="max-width:90vw;max-height:80vh;border-radius:12px;border:2px solid var(--gp-border);background:#000;">
+      <p style="margin-top:10px;font-size:0.8rem;color:var(--gp-muted);">
+        This is exactly what Zoom, Teams, OBS and other apps are seeing right now.
+      </p>
+    </div>
+    <!-- Fallback when there is no live frame yet -->
+    <div x-show="previewError" style="text-align:center;color:var(--gp-muted);max-width:340px;">
       <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.4;"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-      <p style="margin-top:12px;font-size:0.88rem;">Live preview requires an active stream.<br>Connect your GoPro to see the feed.</p>
+      <p style="margin-top:12px;font-size:0.9rem;color:var(--gp-text);" x-text="previewError"></p>
+      <p style="margin-top:6px;font-size:0.82rem;">
+        Make sure your GoPro is connected and streaming. You can start it from the
+        <a href="#" @click.prevent="closePreview(); page='setup';" style="color:var(--gp-accent);text-decoration:underline;">Connect</a> page.
+      </p>
     </div>
   </div>
 </template>
@@ -1384,11 +1431,11 @@ kbd.wide { padding: 2px 14px; }
         <div class="kbd-keys"><kbd>S</kbd></div>
       </div>
       <div class="kbd-row">
-        <div><div class="k-desc">Go to Diagnostics</div></div>
+        <div><div class="k-desc">Go to Advanced &amp; Diagnostics</div></div>
         <div class="kbd-keys"><kbd>D</kbd></div>
       </div>
       <div class="kbd-row">
-        <div><div class="k-desc">Go to Setup / Wizard</div></div>
+        <div><div class="k-desc">Go to Connect</div></div>
         <div class="kbd-keys"><kbd>U</kbd></div>
       </div>
       <div class="kbd-row">
@@ -1547,9 +1594,11 @@ function dashboard() {
 
   return {
     // ── Navigation ──
-    page: 'camera',
+    page: 'home',
     showPreview: false,
     showShortcuts: false,
+    _previewTimer: null,      // interval handle for live-preview frame refresh
+    previewError: '',         // user-facing reason the preview can't show yet
 
     // ── Toasts ──
     toasts: [],
@@ -1588,6 +1637,7 @@ function dashboard() {
     cameraInfo: {},
     camState: { encoding: false, videoDuration: 0, battery: -1, remainingPhotos: 0, remainingVideoTime: 0, remainingSpaceGb: '', mode: '', connected: false, webcamActive: false },
     showRawSettings: false,
+    showManualConnect: false,
     diagRawSettings: {},
     diagWifiSsid: '',
     manualCohnIp: '',
@@ -1701,14 +1751,14 @@ function dashboard() {
           case 'D':
             e.preventDefault();
             self.page = 'diagnostics';
-            self._toast('Diagnostics', 'info', 1500);
+            self._toast('Advanced', 'info', 1500);
             break;
 
           case 'u':
           case 'U':
             e.preventDefault();
             self.page = 'setup';
-            self._toast('Setup', 'info', 1500);
+            self._toast('Connect', 'info', 1500);
             break;
 
           case 'c':
@@ -1732,7 +1782,7 @@ function dashboard() {
           case 'l':
           case 'L':
             e.preventDefault();
-            self.showPreview = !self.showPreview;
+            if (self.showPreview) self.closePreview(); else self.openPreview();
             break;
 
           case 'p':
@@ -1761,7 +1811,7 @@ function dashboard() {
 
           case 'Escape':
             if (self.showShortcuts) { e.preventDefault(); self.showShortcuts = false; }
-            else if (self.showPreview) { e.preventDefault(); self.showPreview = false; }
+            else if (self.showPreview) { e.preventDefault(); self.closePreview(); }
             break;
         }
       });
@@ -1831,6 +1881,36 @@ function dashboard() {
         .catch(function (e) { self._toast('Request failed: ' + (e.message || 'network error'), 'error'); });
     },
 
+    // ── Live preview (shows the actual virtual-camera output) ──
+    openPreview() {
+      var self = this;
+      this.previewError = '';
+      this.showPreview = true;
+      // Wait for the modal <img> to mount, then start refreshing it.
+      this.$nextTick(function () {
+        self._refreshPreviewFrame();
+        if (self._previewTimer) clearInterval(self._previewTimer);
+        // ~5 fps snapshot refresh — smooth enough to confirm the feed, light on CPU.
+        self._previewTimer = setInterval(function () { self._refreshPreviewFrame(); }, 200);
+      });
+    },
+    closePreview() {
+      this.showPreview = false;
+      if (this._previewTimer) { clearInterval(this._previewTimer); this._previewTimer = null; }
+    },
+    _refreshPreviewFrame() {
+      var self = this;
+      var img = this.$refs.previewImg;
+      if (!img) return;
+      var url = '/api/preview/frame.jpg?token=' + encodeURIComponent(this._token) + '&_=' + Date.now();
+      // Probe the endpoint so we can show a friendly message on 503 (no frame yet).
+      fetch(url, { headers: apiHeaders() }).then(function (res) {
+        if (res.ok) { self.previewError = ''; img.src = url; }
+        else if (res.status === 503) { self.previewError = 'No live video yet.'; }
+        else { self.previewError = 'Live preview is unavailable right now.'; }
+      }).catch(function () { self.previewError = 'Lost connection to the app.'; });
+    },
+
     // ── Camera Control methods ──
     toggleRecord() {
       var self = this;
@@ -1888,6 +1968,21 @@ function dashboard() {
     groupName(id) {
       var names = { 1000: 'Video', 1001: 'Photo', 1002: 'Timelapse' };
       return names[id] || ('Group ' + id);
+    },
+    // Friendly name + one-line description for a connection method (transport)
+    transportLabel(t) {
+      var key = String(t).toLowerCase().replace(' ', '_');
+      var names = { usb: 'USB Cable', cohn: 'Home Wi‑Fi', wifi_ap: 'Camera Hotspot' };
+      return names[key] || t;
+    },
+    transportDesc(t) {
+      var key = String(t).toLowerCase().replace(' ', '_');
+      var d = {
+        usb: 'Fastest and most reliable — plug in the cable',
+        cohn: 'Wireless over your home network (needs setup)',
+        wifi_ap: "Joins the camera's own Wi‑Fi hotspot",
+      };
+      return d[key] || '';
     },
     setZoom() {
       apiPost('/api/camera/zoom', { percent: parseInt(this.zoomPercent) });

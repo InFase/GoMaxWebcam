@@ -91,14 +91,18 @@ During transport transitions, the pipeline holds the last decoded frame and cont
 
 ### Browser Dashboard
 
-The dashboard opens automatically at `http://127.0.0.1:<port>/?token=<token>` and has four pages:
+The dashboard opens automatically at `http://127.0.0.1:<port>/?token=<token>` and has six pages:
 
 | Page | What It Shows |
 |------|---------------|
-| **Home** | Live status, camera info, stream controls (pause, visibility, reconnect), live preview |
-| **Settings** | Resolution, FOV, transport priority, auto-start, browser-on-start |
-| **Diagnostics** | Real-time event log, transport state, frame pipeline health |
-| **Setup** | COHN WiFi provisioning wizard (BLE-based) |
+| **Overview** | Plain-English status banner, camera info, and a live view of the actual webcam feed |
+| **Camera** | Recording, modes/presets, digital zoom, power (sleep/wake/reboot), webcam stream |
+| **Media** | Browse, view, download, and delete photos and videos on the camera |
+| **Connect** | Wireless setup — one-tap Bluetooth, a guided Wi-Fi wizard, or manual credentials |
+| **Settings** | Resolution, field of view, connection priority, auto-start |
+| **Advanced** | Live diagnostics, transport state, frame-pipeline health, raw camera settings, export |
+
+The **Live View** (also the `L` shortcut) shows the exact image GoMaxWebcam is sending to your virtual camera — i.e. what Zoom, Teams, and OBS receive.
 
 The dashboard uses a GoPro-inspired dark theme with `#00BCE4` accent color. It is a single-page Alpine.js application served by FastAPI with SSE for real-time updates.
 
